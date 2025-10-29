@@ -1,0 +1,7 @@
++++ N(EV pairs)                       N(Data Sets)   PDFtype(C/L/N)    DiagonalQuad(Y/N)    Dyn_Tol?(Y/N)  Tol_squared 
+        33                               1                 L                  N                   N            1    
++++ ObservableFile                    N(Observables)  Data?(Y/N)      Error_type     Weight          
+        CT18NNLO_mom_test1                           1             Y           1         1
++++     PDFname                       PDFout   
+     ./CT18NNLO/CT18NNLO                ./CT18NNLO_mom_test1/CT18NNLO_mom_test1
+# .in for ePump_v20171221 and after

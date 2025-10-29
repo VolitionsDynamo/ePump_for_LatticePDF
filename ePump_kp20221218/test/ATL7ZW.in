@@ -1,0 +1,6 @@
++++ N(EV pairs)   N(Data Sets)   PDFtype(C/L/N)  DiagonalQuad(Y/N)  Dyn_Tol?(Y/N)   Tol_squared   
+        29              1             L          N                  N               1
++++ ObservableFile  N(Observables)     Data?(Y/N)   Error_type  Weight
+     ATL78WZ/CT18NNLO/ATL7ZW           34   	          Y         4  	    1.0     
++++                  PDFin                                        PDFout
+	  PDFs/CT18NNLO/CT18NNLO	         PDFtmp/CT18NNLO+ATL7ZWTfix1/CT18NNLO+ATL7ZWTfix1

@@ -1,0 +1,351 @@
+-----------------------------------------------------------
+Initializing Main input from file: CT18NNLO_mom_test1.in
+-----------------------------------------------------------
+
+Global weight factor for New data sets w=1
+
++++ N(EV pairs)                       N(Data Sets)   PDFtype(C/L/N)    DiagonalQuad(Y/N)    Dyn_Tol?(Y/N)  Tol_squared 
+        29             1              L              N              1
++++ ObservableFile                    N(Observables)  Data?(Y/N)      Error_type     Weight          
+ CT18NNLO_mom_test1              1                Y           4          1
++++     PDFname                       PDFout   
+    ./CT18NNLO/CT18NNLO        ./CT18NNLO_mom_test1/CT18NNLO_mom_test1
+
+-----------------------------------------------------------------
+Initializing Theory arrays for Data Set 1: CT18NNLO_mom_test1.theory
+-----------------------------------------------------------------
+
+*
+*
+*
+Theory column
+      1
+    D1         D2         D3        X[00]        X[01]        X[02]        X[03]        X[04]        X[05]        X[06]        X[07]        X[08]        X[09]        X[10]        X[11]        X[12]        X[13]        X[14]        X[15]        X[16]        X[17]        X[18]        X[19]        X[20]        X[21]        X[22]        X[23]        X[24]        X[25]        X[26]        X[27]        X[28]        X[29]        X[30]        X[31]        X[32]        X[33]        X[34]        X[35]        X[36]        X[37]        X[38]        X[39]        X[40]        X[41]        X[42]        X[43]        X[44]        X[45]        X[46]        X[47]        X[48]        X[49]        X[50]        X[51]        X[52]        X[53]        X[54]        X[55]        X[56]        X[57]        X[58]
+0.000E+00  0.000E+00  0.000E+00  7.79862E-01  7.84490E-01  8.07831E-01  8.09456E-01  7.44067E-01  8.09780E-01  7.51105E-01  7.68910E-01  7.89241E-01  7.87755E-01  7.73636E-01  7.65635E-01  7.93583E-01  7.63120E-01  7.95557E-01  7.75790E-01  7.83325E-01  7.80586E-01  7.77995E-01  7.56906E-01  8.06803E-01  7.76276E-01  7.84980E-01  7.80364E-01  7.78366E-01  7.77135E-01  7.86780E-01  7.79433E-01  7.80462E-01  7.79473E-01  7.79852E-01  7.73931E-01  7.85396E-01  7.67263E-01  7.94300E-01  7.88655E-01  7.73912E-01  8.01268E-01  7.60560E-01  8.02778E-01  7.55660E-01  7.77745E-01  7.82532E-01  7.72047E-01  7.85588E-01  7.89694E-01  7.74137E-01  8.08339E-01  7.59240E-01  7.64751E-01  7.95370E-01  8.01094E-01  7.58246E-01  7.75210E-01  7.84602E-01  7.80550E-01  7.79895E-01  7.79863E-01  7.79863E-01
+
+-----------------------------------------------------------------
+Initializing Data arrays for Data Set 1: CT18NNLO_mom_test1.data , error_type 4
+-----------------------------------------------------------------
+
+*
+*  lattice pdferror treated as stat error    uncor error 0  no cor error
+*
+*  x        xfxq
+#corr_err  data stat uncor_sys cor_begin
+             0                2                3                4
+
+  Inverse covariance matrix to be constructed from 
+  uncorrelated errors and correlated systematic errors.
+  Nlam = 0  weight (including global weight factor) = 1.00000E+00
+
+ a      XE[a]        s[a]       
+ 1   7.74000E-01  8.20000E-02  
+
+
+data set: 0 PDF set: 0 chi^2: 5.111E-03
+data set: 0 PDF set: 1 chi^2: 1.637E-02
+data set: 0 PDF set: 2 chi^2: 1.702E-01
+data set: 0 PDF set: 3 chi^2: 1.870E-01
+data set: 0 PDF set: 4 chi^2: 1.333E-01
+data set: 0 PDF set: 5 chi^2: 1.904E-01
+data set: 0 PDF set: 6 chi^2: 7.796E-02
+data set: 0 PDF set: 7 chi^2: 3.853E-03
+data set: 0 PDF set: 8 chi^2: 3.455E-02
+data set: 0 PDF set: 9 chi^2: 2.814E-02
+data set: 0 PDF set: 10 chi^2: 1.970E-05
+data set: 0 PDF set: 11 chi^2: 1.041E-02
+data set: 0 PDF set: 12 chi^2: 5.703E-02
+data set: 0 PDF set: 13 chi^2: 1.760E-02
+data set: 0 PDF set: 14 chi^2: 6.911E-02
+data set: 0 PDF set: 15 chi^2: 4.765E-04
+data set: 0 PDF set: 16 chi^2: 1.293E-02
+data set: 0 PDF set: 17 chi^2: 6.451E-03
+data set: 0 PDF set: 18 chi^2: 2.374E-03
+data set: 0 PDF set: 19 chi^2: 4.346E-02
+data set: 0 PDF set: 20 chi^2: 1.600E-01
+data set: 0 PDF set: 21 chi^2: 7.704E-04
+data set: 0 PDF set: 22 chi^2: 1.793E-02
+data set: 0 PDF set: 23 chi^2: 6.023E-03
+data set: 0 PDF set: 24 chi^2: 2.835E-03
+data set: 0 PDF set: 25 chi^2: 1.462E-03
+data set: 0 PDF set: 26 chi^2: 2.429E-02
+data set: 0 PDF set: 27 chi^2: 4.390E-03
+data set: 0 PDF set: 28 chi^2: 6.210E-03
+data set: 0 PDF set: 29 chi^2: 4.455E-03
+data set: 0 PDF set: 30 chi^2: 5.093E-03
+data set: 0 PDF set: 31 chi^2: 7.081E-07
+data set: 0 PDF set: 32 chi^2: 1.931E-02
+data set: 0 PDF set: 33 chi^2: 6.750E-03
+data set: 0 PDF set: 34 chi^2: 6.129E-02
+data set: 0 PDF set: 35 chi^2: 3.194E-02
+data set: 0 PDF set: 36 chi^2: 1.152E-06
+data set: 0 PDF set: 37 chi^2: 1.106E-01
+data set: 0 PDF set: 38 chi^2: 2.686E-02
+data set: 0 PDF set: 39 chi^2: 1.232E-01
+data set: 0 PDF set: 40 chi^2: 5.002E-02
+data set: 0 PDF set: 41 chi^2: 2.086E-03
+data set: 0 PDF set: 42 chi^2: 1.083E-02
+data set: 0 PDF set: 43 chi^2: 5.673E-04
+data set: 0 PDF set: 44 chi^2: 1.997E-02
+data set: 0 PDF set: 45 chi^2: 3.663E-02
+data set: 0 PDF set: 46 chi^2: 2.791E-06
+data set: 0 PDF set: 47 chi^2: 1.754E-01
+data set: 0 PDF set: 48 chi^2: 3.240E-02
+data set: 0 PDF set: 49 chi^2: 1.272E-02
+data set: 0 PDF set: 50 chi^2: 6.792E-02
+data set: 0 PDF set: 51 chi^2: 1.092E-01
+data set: 0 PDF set: 52 chi^2: 3.691E-02
+data set: 0 PDF set: 53 chi^2: 2.177E-04
+data set: 0 PDF set: 54 chi^2: 1.672E-02
+data set: 0 PDF set: 55 chi^2: 6.381E-03
+data set: 0 PDF set: 56 chi^2: 5.168E-03
+data set: 0 PDF set: 57 chi^2: 5.112E-03
+data set: 0 PDF set: 58 chi^2: 5.112E-03
+ Only Linear terms included in updating of best-fit predictions.
+
+ Total Chi2 (z=0)  = 0.0051
+ Total Chi2 (z=z0) = 0.0027
+
+
+-----------------------------------
+Sorted eigenvalues of M:
+-----------------------------------
+
+  0.89658584   0.00000000   0.00000000   0.00000000   0.00000000   0.00000000   0.00000000   0.00000000   0.00000000   0.00000000   0.00000000   0.00000000   0.00000000   0.00000000   0.00000000   0.00000000  -0.00000000  -0.00000000  -0.00000000  -0.00000000  -0.00000000  -0.00000000  -0.00000000  -0.00000000  -0.00000000  -0.00000000  -0.00000000  -0.00000000  -0.00000000 
+
+  Vector zh0[i]=z0[i] from i=1,Ni  (original eigenvector basis)
+ 0      0.0054
+ 1     -0.0150
+ 2     -0.0135
+ 3      0.0047
+ 4     -0.0032
+ 5      0.0064
+ 6      0.0075
+ 7      0.0017
+ 8     -0.0006
+ 9      0.0115
+10      0.0020
+11     -0.0005
+12      0.0022
+13      0.0002
+14      0.0001
+15      0.0026
+16      0.0062
+17     -0.0034
+18     -0.0094
+19     -0.0108
+20      0.0011
+21      0.0031
+22     -0.0036
+23     -0.0113
+24      0.0070
+25     -0.0098
+26      0.0022
+27     -0.0002
+28      0.0000
+
+ Length of best-fit zh0 vector is 3.57E-02
+
+  Vector ch0[r] = -sqrt(1+lambda[r])*sum(U[r][i]z0[i] over i=1,Ni) from r=1,Ni  (updated eigenvector basis)
+ 0      0.0492
+ 1      0.0000
+ 2     -0.0000
+ 3      0.0000
+ 4      0.0000
+ 5      0.0000
+ 6     -0.0000
+ 7     -0.0000
+ 8     -0.0000
+ 9      0.0000
+10      0.0000
+11     -0.0000
+12     -0.0000
+13     -0.0000
+14     -0.0000
+15     -0.0000
+16     -0.0000
+17      0.0000
+18     -0.0000
+19     -0.0000
+20     -0.0000
+21     -0.0000
+22     -0.0000
+23     -0.0000
+24      0.0000
+25      0.0000
+26     -0.0000
+27      0.0000
+28      0.0000
+
+ Length of best-fit ch0 vector is 4.92E-02
+
+
+------------------------------------------------------------
+            Original and Updated Delta Chi-Squares
+------------------------------------------------------------
+
+ Delta Chi2 for original global analysis
+ Old 0.0000
+ New 0.0013
+
+ Delta Chi2 for Data Set: CT18NNLO_mom_test1 with 1 data points (excluding weight factor w[k] = 1.0000)
+ Old 0.0051
+ New 0.0014
+ Old Spartyness -2.3831
+ New Spartyness -2.6012
+
+
+ Total Chi2 for new data sets with 1 data points (including weight factors)
+ Old 0.0051
+ New 0.0014
+
+ Total Chi2 for original global analysis plus new data sets (including weight factors)
+ Old 0.0051
+ New 0.0027
+
+
+-----------------------------------------------------------------------
+ Original and Updated Shifted Data, Residuals, and Reduced Chi-Squares
+-----------------------------------------------------------------------
+
+
+-----------------------------------------------------------------------
+ Original and Updated Optimal Error Shifts (Nuisance Parameters)
+-----------------------------------------------------------------------
+
+
+---------------------------------------------------------------
+      Original and Updated Predictions and Uncertainties
+---------------------------------------------------------------
+
+ For Observables X[a] in Data Set: CT18NNLO_mom_test1
+
+      a      X[a]      DXsym[a]                 DXasym[a]
+Old   1   7.7986E-01  7.7644E-02       -7.5816E-02  +8.3142E-02
+New   1   7.7709E-01  5.6380E-02       -5.5794E-02  +6.1530E-02
+
+
+
+---------------------------------------
+     Updating PDFs, LHAPDF format 
+---------------------------------------
+nflavors = 11
+ -5 -4 -3 -2 -1  1  2  3  4  5 21
+./CT18NNLO/CT18NNLO_0000.dat
+./CT18NNLO_mom_test1/CT18NNLO_mom_test1_0000.dat
+./CT18NNLO/CT18NNLO_0001.dat
+./CT18NNLO_mom_test1/CT18NNLO_mom_test1_0001.dat
+./CT18NNLO/CT18NNLO_0002.dat
+./CT18NNLO_mom_test1/CT18NNLO_mom_test1_0002.dat
+./CT18NNLO/CT18NNLO_0003.dat
+./CT18NNLO_mom_test1/CT18NNLO_mom_test1_0003.dat
+./CT18NNLO/CT18NNLO_0004.dat
+./CT18NNLO_mom_test1/CT18NNLO_mom_test1_0004.dat
+./CT18NNLO/CT18NNLO_0005.dat
+./CT18NNLO_mom_test1/CT18NNLO_mom_test1_0005.dat
+./CT18NNLO/CT18NNLO_0006.dat
+./CT18NNLO_mom_test1/CT18NNLO_mom_test1_0006.dat
+./CT18NNLO/CT18NNLO_0007.dat
+./CT18NNLO_mom_test1/CT18NNLO_mom_test1_0007.dat
+./CT18NNLO/CT18NNLO_0008.dat
+./CT18NNLO_mom_test1/CT18NNLO_mom_test1_0008.dat
+./CT18NNLO/CT18NNLO_0009.dat
+./CT18NNLO_mom_test1/CT18NNLO_mom_test1_0009.dat
+./CT18NNLO/CT18NNLO_0010.dat
+./CT18NNLO_mom_test1/CT18NNLO_mom_test1_0010.dat
+./CT18NNLO/CT18NNLO_0011.dat
+./CT18NNLO_mom_test1/CT18NNLO_mom_test1_0011.dat
+./CT18NNLO/CT18NNLO_0012.dat
+./CT18NNLO_mom_test1/CT18NNLO_mom_test1_0012.dat
+./CT18NNLO/CT18NNLO_0013.dat
+./CT18NNLO_mom_test1/CT18NNLO_mom_test1_0013.dat
+./CT18NNLO/CT18NNLO_0014.dat
+./CT18NNLO_mom_test1/CT18NNLO_mom_test1_0014.dat
+./CT18NNLO/CT18NNLO_0015.dat
+./CT18NNLO_mom_test1/CT18NNLO_mom_test1_0015.dat
+./CT18NNLO/CT18NNLO_0016.dat
+./CT18NNLO_mom_test1/CT18NNLO_mom_test1_0016.dat
+./CT18NNLO/CT18NNLO_0017.dat
+./CT18NNLO_mom_test1/CT18NNLO_mom_test1_0017.dat
+./CT18NNLO/CT18NNLO_0018.dat
+./CT18NNLO_mom_test1/CT18NNLO_mom_test1_0018.dat
+./CT18NNLO/CT18NNLO_0019.dat
+./CT18NNLO_mom_test1/CT18NNLO_mom_test1_0019.dat
+./CT18NNLO/CT18NNLO_0020.dat
+./CT18NNLO_mom_test1/CT18NNLO_mom_test1_0020.dat
+./CT18NNLO/CT18NNLO_0021.dat
+./CT18NNLO_mom_test1/CT18NNLO_mom_test1_0021.dat
+./CT18NNLO/CT18NNLO_0022.dat
+./CT18NNLO_mom_test1/CT18NNLO_mom_test1_0022.dat
+./CT18NNLO/CT18NNLO_0023.dat
+./CT18NNLO_mom_test1/CT18NNLO_mom_test1_0023.dat
+./CT18NNLO/CT18NNLO_0024.dat
+./CT18NNLO_mom_test1/CT18NNLO_mom_test1_0024.dat
+./CT18NNLO/CT18NNLO_0025.dat
+./CT18NNLO_mom_test1/CT18NNLO_mom_test1_0025.dat
+./CT18NNLO/CT18NNLO_0026.dat
+./CT18NNLO_mom_test1/CT18NNLO_mom_test1_0026.dat
+./CT18NNLO/CT18NNLO_0027.dat
+./CT18NNLO_mom_test1/CT18NNLO_mom_test1_0027.dat
+./CT18NNLO/CT18NNLO_0028.dat
+./CT18NNLO_mom_test1/CT18NNLO_mom_test1_0028.dat
+./CT18NNLO/CT18NNLO_0029.dat
+./CT18NNLO_mom_test1/CT18NNLO_mom_test1_0029.dat
+./CT18NNLO/CT18NNLO_0030.dat
+./CT18NNLO_mom_test1/CT18NNLO_mom_test1_0030.dat
+./CT18NNLO/CT18NNLO_0031.dat
+./CT18NNLO_mom_test1/CT18NNLO_mom_test1_0031.dat
+./CT18NNLO/CT18NNLO_0032.dat
+./CT18NNLO_mom_test1/CT18NNLO_mom_test1_0032.dat
+./CT18NNLO/CT18NNLO_0033.dat
+./CT18NNLO_mom_test1/CT18NNLO_mom_test1_0033.dat
+./CT18NNLO/CT18NNLO_0034.dat
+./CT18NNLO_mom_test1/CT18NNLO_mom_test1_0034.dat
+./CT18NNLO/CT18NNLO_0035.dat
+./CT18NNLO_mom_test1/CT18NNLO_mom_test1_0035.dat
+./CT18NNLO/CT18NNLO_0036.dat
+./CT18NNLO_mom_test1/CT18NNLO_mom_test1_0036.dat
+./CT18NNLO/CT18NNLO_0037.dat
+./CT18NNLO_mom_test1/CT18NNLO_mom_test1_0037.dat
+./CT18NNLO/CT18NNLO_0038.dat
+./CT18NNLO_mom_test1/CT18NNLO_mom_test1_0038.dat
+./CT18NNLO/CT18NNLO_0039.dat
+./CT18NNLO_mom_test1/CT18NNLO_mom_test1_0039.dat
+./CT18NNLO/CT18NNLO_0040.dat
+./CT18NNLO_mom_test1/CT18NNLO_mom_test1_0040.dat
+./CT18NNLO/CT18NNLO_0041.dat
+./CT18NNLO_mom_test1/CT18NNLO_mom_test1_0041.dat
+./CT18NNLO/CT18NNLO_0042.dat
+./CT18NNLO_mom_test1/CT18NNLO_mom_test1_0042.dat
+./CT18NNLO/CT18NNLO_0043.dat
+./CT18NNLO_mom_test1/CT18NNLO_mom_test1_0043.dat
+./CT18NNLO/CT18NNLO_0044.dat
+./CT18NNLO_mom_test1/CT18NNLO_mom_test1_0044.dat
+./CT18NNLO/CT18NNLO_0045.dat
+./CT18NNLO_mom_test1/CT18NNLO_mom_test1_0045.dat
+./CT18NNLO/CT18NNLO_0046.dat
+./CT18NNLO_mom_test1/CT18NNLO_mom_test1_0046.dat
+./CT18NNLO/CT18NNLO_0047.dat
+./CT18NNLO_mom_test1/CT18NNLO_mom_test1_0047.dat
+./CT18NNLO/CT18NNLO_0048.dat
+./CT18NNLO_mom_test1/CT18NNLO_mom_test1_0048.dat
+./CT18NNLO/CT18NNLO_0049.dat
+./CT18NNLO_mom_test1/CT18NNLO_mom_test1_0049.dat
+./CT18NNLO/CT18NNLO_0050.dat
+./CT18NNLO_mom_test1/CT18NNLO_mom_test1_0050.dat
+./CT18NNLO/CT18NNLO_0051.dat
+./CT18NNLO_mom_test1/CT18NNLO_mom_test1_0051.dat
+./CT18NNLO/CT18NNLO_0052.dat
+./CT18NNLO_mom_test1/CT18NNLO_mom_test1_0052.dat
+./CT18NNLO/CT18NNLO_0053.dat
+./CT18NNLO_mom_test1/CT18NNLO_mom_test1_0053.dat
+./CT18NNLO/CT18NNLO_0054.dat
+./CT18NNLO_mom_test1/CT18NNLO_mom_test1_0054.dat
+./CT18NNLO/CT18NNLO_0055.dat
+./CT18NNLO_mom_test1/CT18NNLO_mom_test1_0055.dat
+./CT18NNLO/CT18NNLO_0056.dat
+./CT18NNLO_mom_test1/CT18NNLO_mom_test1_0056.dat
+./CT18NNLO/CT18NNLO_0057.dat
+./CT18NNLO_mom_test1/CT18NNLO_mom_test1_0057.dat
+./CT18NNLO/CT18NNLO_0058.dat
+./CT18NNLO_mom_test1/CT18NNLO_mom_test1_0058.dat

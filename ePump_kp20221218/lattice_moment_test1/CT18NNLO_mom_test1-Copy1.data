@@ -1,0 +1,8 @@
+*
+*  lattice pdferror treated as stat error    uncor error 0  no cor error
+*
+*  x        xfxq           
+#corr_err  data stat uncor_sys cor_begin
+0 2 3 4 5
+x  Q2  xfxq         error 
+0.5 2.5 0.005 0 0
