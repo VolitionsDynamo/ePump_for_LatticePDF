@@ -5,4 +5,4 @@
 #corr_err  data stat uncor_sys cor_begin
 0 3 4 5 6
 x  Q2  xfxq         error 
-0.5 2 0.5 0.14 0 0
+0.5 2 0.28 0.01 0 0

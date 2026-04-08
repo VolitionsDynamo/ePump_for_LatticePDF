@@ -21,7 +21,7 @@ Initializing Theory arrays for Data Set 1: CT18NNLO_mom_test1.theory
 Theory column
       1
     D1         D2         D3        X[00]        X[01]        X[02]        X[03]        X[04]        X[05]        X[06]        X[07]        X[08]        X[09]        X[10]        X[11]        X[12]        X[13]        X[14]        X[15]        X[16]        X[17]        X[18]        X[19]        X[20]        X[21]        X[22]        X[23]        X[24]        X[25]        X[26]        X[27]        X[28]        X[29]        X[30]        X[31]        X[32]        X[33]        X[34]        X[35]        X[36]        X[37]        X[38]        X[39]        X[40]        X[41]        X[42]        X[43]        X[44]        X[45]        X[46]        X[47]        X[48]        X[49]        X[50]        X[51]        X[52]        X[53]        X[54]        X[55]        X[56]        X[57]        X[58]
-0.000E+00  0.000E+00  0.000E+00  2.41439E-01  2.42824E-01  2.43188E-01  2.51353E-01  2.32691E-01  2.41368E-01  2.41630E-01  2.43953E-01  2.39478E-01  2.44885E-01  2.39436E-01  2.43708E-01  2.45805E-01  2.40646E-01  2.36789E-01  2.38945E-01  2.43525E-01  2.41081E-01  2.41981E-01  2.42645E-01  2.39329E-01  2.42852E-01  2.39379E-01  2.45168E-01  2.34661E-01  2.41181E-01  2.43243E-01  2.43170E-01  2.39782E-01  2.47064E-01  2.29117E-01  2.42982E-01  2.40959E-01  2.32584E-01  2.48773E-01  2.39275E-01  2.43228E-01  2.41503E-01  2.41907E-01  2.44943E-01  2.38768E-01  2.44721E-01  2.37772E-01  2.33181E-01  2.45985E-01  2.42851E-01  2.41456E-01  2.46469E-01  2.35823E-01  2.41679E-01  2.38359E-01  2.41484E-01  2.42131E-01  2.41137E-01  2.44129E-01  2.41958E-01  2.40564E-01  2.41439E-01  2.41439E-01
+0.000E+00  0.000E+00  0.000E+00  1.61348E-01  1.62799E-01  1.66097E-01  1.66031E-01  1.57676E-01  1.62681E-01  1.60821E-01  1.60854E-01  1.61765E-01  1.61562E-01  1.61429E-01  1.62281E-01  1.63490E-01  1.58843E-01  1.61841E-01  1.59436E-01  1.62959E-01  1.61360E-01  1.61346E-01  1.60307E-01  1.61720E-01  1.61099E-01  1.61904E-01  1.62707E-01  1.58739E-01  1.60945E-01  1.62884E-01  1.61397E-01  1.61206E-01  1.61764E-01  1.58083E-01  1.62066E-01  1.60205E-01  1.58317E-01  1.63403E-01  1.60882E-01  1.61847E-01  1.61888E-01  1.61179E-01  1.65483E-01  1.57425E-01  1.62251E-01  1.59965E-01  1.58586E-01  1.62608E-01  1.61445E-01  1.61518E-01  1.63420E-01  1.58949E-01  1.58571E-01  1.63108E-01  1.61395E-01  1.61399E-01  1.62114E-01  1.61277E-01  1.61310E-01  1.61044E-01  1.61348E-01  1.61348E-01
 
 -----------------------------------------------------------------
 Initializing Data arrays for Data Set 1: CT18NNLO_mom_test1.data , error_type 4
@@ -39,145 +39,145 @@ Initializing Data arrays for Data Set 1: CT18NNLO_mom_test1.data , error_type 4
   Nlam = 0  weight (including global weight factor) = 1.00000E+00
 
  a      XE[a]        s[a]       
- 1   5.00000E-01  1.40000E-01  
+ 1   2.80000E-01  1.00000E-02  
 
 
-data set: 0 PDF set: 0 chi^2: 3.411E+00
-data set: 0 PDF set: 1 chi^2: 3.374E+00
-data set: 0 PDF set: 2 chi^2: 3.365E+00
-data set: 0 PDF set: 3 chi^2: 3.154E+00
-data set: 0 PDF set: 4 chi^2: 3.646E+00
-data set: 0 PDF set: 5 chi^2: 3.413E+00
-data set: 0 PDF set: 6 chi^2: 3.406E+00
-data set: 0 PDF set: 7 chi^2: 3.345E+00
-data set: 0 PDF set: 8 chi^2: 3.463E+00
-data set: 0 PDF set: 9 chi^2: 3.321E+00
-data set: 0 PDF set: 10 chi^2: 3.464E+00
-data set: 0 PDF set: 11 chi^2: 3.351E+00
-data set: 0 PDF set: 12 chi^2: 3.297E+00
-data set: 0 PDF set: 13 chi^2: 3.432E+00
-data set: 0 PDF set: 14 chi^2: 3.535E+00
-data set: 0 PDF set: 15 chi^2: 3.477E+00
-data set: 0 PDF set: 16 chi^2: 3.356E+00
-data set: 0 PDF set: 17 chi^2: 3.420E+00
-data set: 0 PDF set: 18 chi^2: 3.397E+00
-data set: 0 PDF set: 19 chi^2: 3.379E+00
-data set: 0 PDF set: 20 chi^2: 3.467E+00
-data set: 0 PDF set: 21 chi^2: 3.374E+00
-data set: 0 PDF set: 22 chi^2: 3.465E+00
-data set: 0 PDF set: 23 chi^2: 3.313E+00
-data set: 0 PDF set: 24 chi^2: 3.592E+00
-data set: 0 PDF set: 25 chi^2: 3.418E+00
-data set: 0 PDF set: 26 chi^2: 3.363E+00
-data set: 0 PDF set: 27 chi^2: 3.365E+00
-data set: 0 PDF set: 28 chi^2: 3.455E+00
-data set: 0 PDF set: 29 chi^2: 3.264E+00
-data set: 0 PDF set: 30 chi^2: 3.744E+00
-data set: 0 PDF set: 31 chi^2: 3.370E+00
-data set: 0 PDF set: 32 chi^2: 3.424E+00
-data set: 0 PDF set: 33 chi^2: 3.649E+00
-data set: 0 PDF set: 34 chi^2: 3.220E+00
-data set: 0 PDF set: 35 chi^2: 3.468E+00
-data set: 0 PDF set: 36 chi^2: 3.364E+00
-data set: 0 PDF set: 37 chi^2: 3.409E+00
-data set: 0 PDF set: 38 chi^2: 3.399E+00
-data set: 0 PDF set: 39 chi^2: 3.319E+00
-data set: 0 PDF set: 40 chi^2: 3.482E+00
-data set: 0 PDF set: 41 chi^2: 3.325E+00
-data set: 0 PDF set: 42 chi^2: 3.508E+00
-data set: 0 PDF set: 43 chi^2: 3.632E+00
-data set: 0 PDF set: 44 chi^2: 3.292E+00
-data set: 0 PDF set: 45 chi^2: 3.374E+00
-data set: 0 PDF set: 46 chi^2: 3.410E+00
-data set: 0 PDF set: 47 chi^2: 3.279E+00
-data set: 0 PDF set: 48 chi^2: 3.561E+00
-data set: 0 PDF set: 49 chi^2: 3.405E+00
-data set: 0 PDF set: 50 chi^2: 3.493E+00
-data set: 0 PDF set: 51 chi^2: 3.410E+00
-data set: 0 PDF set: 52 chi^2: 3.393E+00
-data set: 0 PDF set: 53 chi^2: 3.419E+00
-data set: 0 PDF set: 54 chi^2: 3.340E+00
-data set: 0 PDF set: 55 chi^2: 3.397E+00
-data set: 0 PDF set: 56 chi^2: 3.434E+00
-data set: 0 PDF set: 57 chi^2: 3.411E+00
-data set: 0 PDF set: 58 chi^2: 3.411E+00
+data set: 0 PDF set: 0 chi^2: 1.408E+02
+data set: 0 PDF set: 1 chi^2: 1.374E+02
+data set: 0 PDF set: 2 chi^2: 1.297E+02
+data set: 0 PDF set: 3 chi^2: 1.299E+02
+data set: 0 PDF set: 4 chi^2: 1.496E+02
+data set: 0 PDF set: 5 chi^2: 1.376E+02
+data set: 0 PDF set: 6 chi^2: 1.420E+02
+data set: 0 PDF set: 7 chi^2: 1.420E+02
+data set: 0 PDF set: 8 chi^2: 1.398E+02
+data set: 0 PDF set: 9 chi^2: 1.403E+02
+data set: 0 PDF set: 10 chi^2: 1.406E+02
+data set: 0 PDF set: 11 chi^2: 1.386E+02
+data set: 0 PDF set: 12 chi^2: 1.357E+02
+data set: 0 PDF set: 13 chi^2: 1.468E+02
+data set: 0 PDF set: 14 chi^2: 1.396E+02
+data set: 0 PDF set: 15 chi^2: 1.454E+02
+data set: 0 PDF set: 16 chi^2: 1.370E+02
+data set: 0 PDF set: 17 chi^2: 1.408E+02
+data set: 0 PDF set: 18 chi^2: 1.408E+02
+data set: 0 PDF set: 19 chi^2: 1.433E+02
+data set: 0 PDF set: 20 chi^2: 1.399E+02
+data set: 0 PDF set: 21 chi^2: 1.414E+02
+data set: 0 PDF set: 22 chi^2: 1.395E+02
+data set: 0 PDF set: 23 chi^2: 1.376E+02
+data set: 0 PDF set: 24 chi^2: 1.470E+02
+data set: 0 PDF set: 25 chi^2: 1.417E+02
+data set: 0 PDF set: 26 chi^2: 1.372E+02
+data set: 0 PDF set: 27 chi^2: 1.407E+02
+data set: 0 PDF set: 28 chi^2: 1.411E+02
+data set: 0 PDF set: 29 chi^2: 1.398E+02
+data set: 0 PDF set: 30 chi^2: 1.486E+02
+data set: 0 PDF set: 31 chi^2: 1.391E+02
+data set: 0 PDF set: 32 chi^2: 1.435E+02
+data set: 0 PDF set: 33 chi^2: 1.481E+02
+data set: 0 PDF set: 34 chi^2: 1.359E+02
+data set: 0 PDF set: 35 chi^2: 1.419E+02
+data set: 0 PDF set: 36 chi^2: 1.396E+02
+data set: 0 PDF set: 37 chi^2: 1.395E+02
+data set: 0 PDF set: 38 chi^2: 1.412E+02
+data set: 0 PDF set: 39 chi^2: 1.311E+02
+data set: 0 PDF set: 40 chi^2: 1.502E+02
+data set: 0 PDF set: 41 chi^2: 1.386E+02
+data set: 0 PDF set: 42 chi^2: 1.441E+02
+data set: 0 PDF set: 43 chi^2: 1.474E+02
+data set: 0 PDF set: 44 chi^2: 1.378E+02
+data set: 0 PDF set: 45 chi^2: 1.406E+02
+data set: 0 PDF set: 46 chi^2: 1.404E+02
+data set: 0 PDF set: 47 chi^2: 1.359E+02
+data set: 0 PDF set: 48 chi^2: 1.465E+02
+data set: 0 PDF set: 49 chi^2: 1.475E+02
+data set: 0 PDF set: 50 chi^2: 1.366E+02
+data set: 0 PDF set: 51 chi^2: 1.407E+02
+data set: 0 PDF set: 52 chi^2: 1.407E+02
+data set: 0 PDF set: 53 chi^2: 1.390E+02
+data set: 0 PDF set: 54 chi^2: 1.410E+02
+data set: 0 PDF set: 55 chi^2: 1.409E+02
+data set: 0 PDF set: 56 chi^2: 1.415E+02
+data set: 0 PDF set: 57 chi^2: 1.408E+02
+data set: 0 PDF set: 58 chi^2: 1.408E+02
  Only Linear terms included in updating of best-fit predictions.
 
- Total Chi2 (z=0)  = 3.4109
- Total Chi2 (z=z0) = 3.3435
+ Total Chi2 (z=0)  = 140.7830
+ Total Chi2 (z=z0) = 80.2141
 
 
 -----------------------------------
 Sorted eigenvalues of M:
 -----------------------------------
 
-  0.02015913   0.00000000   0.00000000   0.00000000   0.00000000   0.00000000   0.00000000   0.00000000   0.00000000   0.00000000   0.00000000   0.00000000   0.00000000   0.00000000   0.00000000   0.00000000  -0.00000000  -0.00000000  -0.00000000  -0.00000000  -0.00000000  -0.00000000  -0.00000000  -0.00000000  -0.00000000  -0.00000000  -0.00000000  -0.00000000  -0.00000000 
+  0.75509044   0.00000000   0.00000000   0.00000000   0.00000000   0.00000000   0.00000000   0.00000000   0.00000000   0.00000000   0.00000000   0.00000000   0.00000000   0.00000000   0.00000000   0.00000000  -0.00000000  -0.00000000  -0.00000000  -0.00000000  -0.00000000  -0.00000000  -0.00000000  -0.00000000  -0.00000000  -0.00000000  -0.00000000  -0.00000000  -0.00000000 
 
   Vector zh0[i]=z0[i] from i=1,Ni  (original eigenvector basis)
- 0     -0.0024
- 1      0.1207
- 2     -0.0017
- 3      0.0289
- 4      0.0352
- 5     -0.0136
- 6      0.0249
- 7     -0.0296
- 8     -0.0058
- 9      0.0214
-10      0.0225
-11      0.0679
-12     -0.0133
-13      0.0219
-14      0.1160
-15      0.0131
-16     -0.1047
-17     -0.0256
-18     -0.0026
-19      0.0399
-20      0.0449
-21     -0.0828
-22      0.0090
-23      0.0688
-24      0.0215
-25     -0.0042
-26     -0.0193
-27      0.0090
+ 0     -1.1148
+ 1      2.8242
+ 2      0.6287
+ 3     -0.3079
+ 4      0.0450
+ 5     -0.4087
+ 6     -1.0134
+ 7     -1.1909
+ 8      0.0047
+ 9     -0.4776
+10     -0.2721
+11      1.3413
+12     -0.6554
+13      0.0646
+14      1.2443
+15      0.6291
+16     -1.7192
+17     -0.3262
+18      0.2397
+19      2.7238
+20      0.7727
+21     -1.3595
+22     -0.0247
+23      1.5113
+24     -1.5336
+25     -0.0014
+26      0.2829
+27      0.0899
 28      0.0000
 
- Length of best-fit zh0 vector is 2.57E-01
+ Length of best-fit zh0 vector is 5.87E+00
 
   Vector ch0[r] = -sqrt(1+lambda[r])*sum(U[r][i]z0[i] over i=1,Ni) from r=1,Ni  (updated eigenvector basis)
- 0     -0.2596
+ 0     -7.7826
  1      0.0000
- 2     -0.0000
- 3     -0.0000
+ 2      0.0000
+ 3      0.0000
  4     -0.0000
- 5      0.0000
+ 5     -0.0000
  6     -0.0000
  7      0.0000
  8     -0.0000
- 9      0.0000
+ 9     -0.0000
 10      0.0000
-11      0.0000
-12      0.0000
+11     -0.0000
+12     -0.0000
 13      0.0000
 14     -0.0000
 15     -0.0000
-16      0.0000
+16     -0.0000
 17     -0.0000
 18     -0.0000
 19     -0.0000
 20      0.0000
 21     -0.0000
-22     -0.0000
+22      0.0000
 23     -0.0000
-24      0.0000
-25     -0.0000
-26     -0.0000
+24     -0.0000
+25      0.0000
+26      0.0000
 27      0.0000
-28     -0.0000
+28      0.0000
 
- Length of best-fit ch0 vector is 2.60E-01
+ Length of best-fit ch0 vector is 7.78E+00
 
 
 ------------------------------------------------------------
@@ -186,22 +186,22 @@ Sorted eigenvalues of M:
 
  Delta Chi2 for original global analysis
  Old 0.0000
- New 0.0661
+ New 34.5104
 
  Delta Chi2 for Data Set: CT18NNLO_mom_test1 with 1 data points (excluding weight factor w[k] = 1.0000)
- Old 3.4109
- New 3.2774
- Old Spartyness 0.5308
- New Spartyness 0.4889
+ Old 140.7830
+ New 45.7037
+ Old Spartyness 18.3853
+ New Spartyness 6.5517
 
 
  Total Chi2 for new data sets with 1 data points (including weight factors)
- Old 3.4109
- New 3.2774
+ Old 140.7830
+ New 45.7037
 
  Total Chi2 for original global analysis plus new data sets (including weight factors)
- Old 3.4109
- New 3.3435
+ Old 140.7830
+ New 80.2141
 
 
 -----------------------------------------------------------------------
@@ -221,8 +221,8 @@ Sorted eigenvalues of M:
  For Observables X[a] in Data Set: CT18NNLO_mom_test1
 
       a      X[a]      DXsym[a]                 DXasym[a]
-Old   1   2.4144E-01  1.9878E-02       -2.3144E-02  +1.8362E-02
-New   1   2.4655E-01  1.9680E-02       -2.2925E-02  +1.8199E-02
+Old   1   1.6135E-01  8.6896E-03       -9.5899E-03  +9.5669E-03
+New   1   2.1240E-01  6.5592E-03       -7.4904E-03  +7.7311E-03
 
 
 
