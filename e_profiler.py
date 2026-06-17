@@ -1,0 +1,634 @@
+#!/home/daniel/miniconda3/envs/apfelpp/bin/python3
+"""
+e_profiler.py - Standalone, robust CLI script to interface Python observable computations with the ePump profiling engine.
+"""
+
+import sys
+import os
+import argparse
+import re
+import numpy as np
+import lhapdf
+
+# Find relative path of default LHAPDF examples in the repository
+SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
+LATTICE_TEST_DIR = os.path.abspath(os.path.join(SCRIPT_DIR, 'ePump_kp20221218', 'lattice_moment_test1'))
+
+def setup_lhapdf_path(custom_path=None):
+    """
+    Sets up the LHAPDF_DATA_PATH environment variable portably.
+    """
+    paths = []
+    if custom_path:
+        paths.append(os.path.abspath(custom_path))
+    paths.append(LATTICE_TEST_DIR)
+    paths.append(os.getcwd())
+    
+    # Append any pre-existing paths
+    env_path = os.environ.get('LHAPDF_DATA_PATH', '')
+    if env_path:
+        paths.append(env_path)
+        
+    os.environ['LHAPDF_DATA_PATH'] = ':'.join(paths)
+
+def find_pdf_dir(pdf_name):
+    """
+    Finds the absolute path of the starting PDF set directory.
+    Checks:
+    1. Current working directory.
+    2. LHAPDF search paths via lhapdf.paths().
+    3. LHAPDF_DATA_PATH environment variable.
+    """
+    # 1. Check current directory
+    if os.path.exists(pdf_name):
+        return os.path.abspath(pdf_name)
+    # 2. Try importing lhapdf and using search paths
+    try:
+        import lhapdf
+        for p in lhapdf.paths():
+            full_path = os.path.join(p, pdf_name)
+            if os.path.exists(full_path):
+                return os.path.abspath(full_path)
+    except Exception:
+        pass
+    # 3. Check environment LHAPDF_DATA_PATH
+    env_path = os.environ.get("LHAPDF_DATA_PATH", "")
+    for p in env_path.split(":"):
+        if p:
+            full_path = os.path.join(p, pdf_name)
+            if os.path.exists(full_path):
+                return os.path.abspath(full_path)
+    return None
+
+def ensure_pdf_symlink(pdf_name):
+    """
+    Ensures that a symlink or directory with name `pdf_name` exists in the current
+    working directory, pointing to the actual PDF set directory in LHAPDF.
+    """
+    if os.path.exists(pdf_name):
+        return
+    
+    pdf_dir = find_pdf_dir(pdf_name)
+    if pdf_dir:
+        abs_pdf_name = os.path.abspath(pdf_name)
+        if pdf_dir != abs_pdf_name:
+            print(f"Creating symlink for PDF set {pdf_name} -> {pdf_dir} ...")
+            try:
+                os.symlink(pdf_dir, pdf_name)
+            except Exception as e:
+                print(f"Warning: Failed to create symlink: {e}", file=sys.stderr)
+
+def generate_in_file(filepath, base_name, n_ev_pairs, n_obs, pdf_name):
+    """
+    Writes the .in control file for ePump.
+    """
+    ensure_pdf_symlink(pdf_name)
+    pdf_in_path = f"./{pdf_name}/{pdf_name}"
+    pdf_out_path = f"./{base_name}/{base_name}"
+    
+    with open(filepath, "w") as f:
+        f.write("+++ N(EV pairs)                       N(Data Sets)   PDFtype(C/L/N)    DiagonalQuad(Y/N)    Dyn_Tol?(Y/N)  Tol_squared \n")
+        f.write(f"        {n_ev_pairs:<38}{1:<17}L                  N                   N            1    \n")
+        f.write("+++ ObservableFile                    N(Observables)  Data?(Y/N)      Error_type     Weight          \n")
+        f.write(f"        {base_name:<36}{n_obs:<16}Y                4           1\n")
+        f.write("+++     PDFname                       PDFout   \n")
+        f.write(f"     {pdf_in_path:<36}{pdf_out_path}\n")
+        f.write("# Generated dynamically by e_profiler.py\n")
+
+def parse_flavor_expression(expression):
+    """
+    Safely parses an algebraic linear combination of flavor names or PIDs.
+    Returns a list of tuples: (coefficient, PID)
+    """
+    clean_expr = expression.replace(' ', '')
+    
+    # Match terms: optional coefficient (e.g. 2, -1.5, +), operator, and flavor/PID
+    pattern = r'([+-]?\s*\d*\.?\d*)\s*\*?\s*([a-zA-Z]+|-?\d+)'
+    matches = re.findall(pattern, clean_expr)
+    
+    parsed_terms = []
+    flavor_map = {
+        'g': 21, 'gluon': 21,
+        'd': 1, 'u': 2, 's': 3, 'c': 4, 'b': 5, 't': 6,
+        'dbar': -1, 'ubar': -2, 'sbar': -3, 'cbar': -4, 'bbar': -5, 'tbar': -6
+    }
+    
+    for coeff_str, name_str in matches:
+        coeff_str = coeff_str.replace(' ', '')
+        if not coeff_str or coeff_str == '+':
+            coeff = 1.0
+        elif coeff_str == '-':
+            coeff = -1.0
+        else:
+            coeff = float(coeff_str)
+            
+        name_str = name_str.strip()
+        if name_str.lower() in flavor_map:
+            pid = flavor_map[name_str.lower()]
+        else:
+            try:
+                pid = int(name_str)
+            except ValueError:
+                raise ValueError(f"Unknown PDF flavor or PID: '{name_str}'")
+                
+        parsed_terms.append((coeff, pid))
+        
+    if not parsed_terms:
+        raise ValueError(f"Could not parse flavor expression: '{expression}'")
+        
+    return parsed_terms
+
+def evaluate_pdf_combination(pdf_member, parsed_terms, x, Q2):
+    """
+    Evaluates any linear combination of PDFs for a given member, x, and Q^2.
+    """
+    # LHAPDF member xfxQ2 returns x * f(x, Q^2)
+    return sum(coeff * pdf_member.xfxQ2(pid, x, Q2) for coeff, pid in parsed_terms)
+
+def compute_integrated_moment(pdf_member, parsed_terms, xmin, xmax, nx, Q2, weight_func=None):
+    """
+    Computes numerical moment integration over [xmin, xmax] using logarithmic x spacing and an optional weight function.
+    """
+    x_grid = 10**np.linspace(np.log10(xmin), np.log10(xmax), nx)
+    y_values = np.array([evaluate_pdf_combination(pdf_member, parsed_terms, x, Q2) for x in x_grid])
+    
+    if weight_func is not None:
+        y_values = y_values * np.array([weight_func(x) for x in x_grid])
+        
+    # Trapezoidal integration
+    integral = np.sum((y_values[1:] + y_values[:-1]) * np.diff(x_grid)) / 2.0
+    return float(integral)
+
+def compute_observable(pdf_set_members, parsed_terms, args):
+    """
+    Computes observable (point or moment) for all members of a PDF set.
+    """
+    results = []
+    for member in pdf_set_members:
+        if args.obs_type == 'point':
+            val = evaluate_pdf_combination(member, parsed_terms, args.x, args.Q2)
+        else:
+            val = compute_integrated_moment(member, parsed_terms, args.xmin, args.xmax, args.nx, args.Q2)
+        results.append(val)
+    return np.array(results)
+
+def load_weight_function(python_file_path, func_name):
+    """
+    Dynamically loads a function from a specified python file.
+    """
+    if not python_file_path or not func_name:
+        return None
+        
+    if not os.path.exists(python_file_path):
+        raise FileNotFoundError(f"Weight function file not found: {python_file_path}")
+        
+    import importlib.util
+    import sys
+    
+    abs_path = os.path.abspath(python_file_path)
+    module_name = "aux_weight_functions"
+    
+    spec = importlib.util.spec_from_file_location(module_name, abs_path)
+    if spec is None or spec.loader is None:
+        raise ImportError(f"Could not load spec for python file: {python_file_path}")
+        
+    module = importlib.util.module_from_spec(spec)
+    sys.modules[module_name] = module
+    try:
+        spec.loader.exec_module(module)
+    except Exception as e:
+        raise ImportError(f"Error executing python file {python_file_path}: {e}")
+        
+    if not hasattr(module, func_name):
+        raise AttributeError(f"Function '{func_name}' not found in file: {python_file_path}")
+        
+    func = getattr(module, func_name)
+    if not callable(func):
+        raise TypeError(f"'{func_name}' in {python_file_path} is not a callable function.")
+        
+    return func
+
+def generate_theory_file(filepath, pdf_members, measurements, args):
+    """
+    Computes theoretical predictions for all PDF members and all measurements,
+    taking into account per-measurement flavor combinations, types, bounds, and weight functions.
+    Writes them to a .theory file.
+    """
+    n_members = len(pdf_members)
+    n_obs = len(measurements)
+    
+    Ms = np.zeros((n_members, n_obs))
+    
+    parsed_flavors_cache = []
+    weight_funcs_cache = []
+    for m in measurements:
+        parsed_terms = parse_flavor_expression(m['flavor'])
+        parsed_flavors_cache.append(parsed_terms)
+        
+        w_func = load_weight_function(m['weight_file'], m['weight_func'])
+        weight_funcs_cache.append(w_func)
+        
+    for i, member in enumerate(pdf_members):
+        for j, m in enumerate(measurements):
+            x_val = m['x']
+            Q2_val = m['Q2']
+            parsed_terms = parsed_flavors_cache[j]
+            weight_func = weight_funcs_cache[j]
+            
+            if m['obs_type'] == 'point':
+                val = evaluate_pdf_combination(member, parsed_terms, x_val, Q2_val)
+            else:
+                val = compute_integrated_moment(member, parsed_terms, m['xmin'], m['xmax'], m['nx'], Q2_val, weight_func)
+            Ms[i, j] = val
+            
+    with open(filepath, "w") as f:
+        f.write("*\n*\n*\n")
+        f.write("Theory column\n")
+        f.write(f"{n_obs}\n")
+        for i in range(n_members):
+            f.write(f"PDF_{i}_Set\n")
+            formatted_row = "".join(f"{Ms[i, j]:12.6f}" for j in range(n_obs))
+            f.write(formatted_row + "\n")
+            
+    return Ms
+
+def generate_data_file(filepath, measurements):
+    """
+    Writes measurements to a .data file in ePump format.
+    """
+    first_m = measurements[0]
+    C = len(first_m['cor_sys'])
+    
+    with open(filepath, "w") as f:
+        f.write("*\n* Generated dynamically by e_profiler.py\n*\n")
+        f.write("*  x    Q2    value         stat        uncor_sys   cor_sys...\n")
+        f.write("#corr_err  data stat uncor_sys cor_begin\n")
+        f.write(f"{C} 3 4 5 6\n")
+        f.write("x  Q2  value         error\n")
+        
+        for m in measurements:
+            vals = [m['x'], m['Q2'], m['value'], m['stat'], m['uncor_sys']]
+            cor_sys = list(m['cor_sys'])
+            while len(cor_sys) < C:
+                cor_sys.append(0.0)
+            cor_sys = cor_sys[:C]
+            vals.extend(cor_sys)
+            
+            row_str = " ".join(f"{val}" for val in vals)
+            f.write(row_str + "\n")
+
+def parse_arguments():
+    parser = argparse.ArgumentParser(
+        description='ePump Hessian profiling pipeline for Point/Moment PDF observables.',
+        formatter_class=argparse.ArgumentDefaultsHelpFormatter
+    )
+
+    # Core/PDF Options
+    parser.add_argument('--pdf', type=str, default='CT18NNLO',
+                        help='Starting PDF set name.')
+    
+    # Observable Options
+    parser.add_argument('--obs-type', type=str, choices=['point', 'moment'], default='moment',
+                        help='Observable type to profile.')
+    parser.add_argument('--x', type=float, default=0.5,
+                        help='x value for point observable.')
+    parser.add_argument('--xmin', type=float, default=0.1,
+                        help='xmin for integrated moment.')
+    parser.add_argument('--xmax', type=float, default=0.7,
+                        help='xmax for integrated moment.')
+    parser.add_argument('--nx', type=int, default=100,
+                        help='Number of integration points.')
+    parser.add_argument('--Q2', type=float, default=4.0,
+                        help='Scale Q^2 for evaluation in GeV^2.')
+    parser.add_argument('--flavor', type=str, default='u-d',
+                        help='Algebraic linear combination of PDF flavors (e.g., "u-d", "2*u - 1.5*d", "ubar - dbar").')
+    parser.add_argument('--weight-file', type=str, default=None,
+                        help='Path to a python file (.py) containing custom weight function definitions.')
+    parser.add_argument('--weight-func', type=str, default=None,
+                        help='Name of the weight function within the weight-file to convolute against.')
+
+    # Measurement/Data Options
+    parser.add_argument('--measurement', action='append', nargs='+', type=float,
+                        help='Repeatable measurement: x Q2 value stat [uncor_sys] [cor_sys...]')
+    parser.add_argument('--data-file', type=str, default=None,
+                        help='Path to a space- or comma-separated text file with columns: x Q2 value stat [uncor_sys] [cor_sys...]')
+
+    # Output / ePump Options
+    parser.add_argument('--name', type=str, default='CT18NNLO_mom_test1',
+                        help='Output base name for ePump input/output files.')
+    parser.add_argument('--epump-path', type=str, default='./ePump_kp20221218/src/UpdatePDFs',
+                        help='Path to the compiled UpdatePDFs binary.')
+
+    return parser.parse_args()
+
+def parse_measurements(args):
+    """
+    Parses and merges measurements from CLI flags and/or external files (JSON or text).
+    Returns a list of dictionaries, where each measurement dictionary has keys:
+    'x', 'Q2', 'value', 'stat', 'uncor_sys', 'cor_sys', 'obs_type', 'flavor', 'xmin', 'xmax', 'nx', 'weight_expr', 'weight_file'
+    """
+    measurements = []
+
+    active_config = {
+        'obs_type': args.obs_type,
+        'flavor': args.flavor,
+        'xmin': args.xmin,
+        'xmax': args.xmax,
+        'nx': args.nx,
+        'weight_file': args.weight_file,
+        'weight_func': args.weight_func
+    }
+
+    def make_measurement_dict(vals, config):
+        m_full = list(vals)
+        while len(m_full) < 5:
+            m_full.append(0.0)
+        
+        return {
+            'x': m_full[0],
+            'Q2': m_full[1],
+            'value': m_full[2],
+            'stat': m_full[3],
+            'uncor_sys': m_full[4],
+            'cor_sys': m_full[5:],
+            'obs_type': config['obs_type'],
+            'flavor': config['flavor'],
+            'xmin': config['xmin'],
+            'xmax': config['xmax'],
+            'nx': config['nx'],
+            'weight_file': config['weight_file'],
+            'weight_func': config['weight_func']
+        }
+
+    # 1. Parse from repeatable CLI flags (use global CLI configs)
+    if args.measurement:
+        for m in args.measurement:
+            if len(m) < 4:
+                print(f"Error: CLI measurement must contain at least [x, Q2, value, stat]. Got: {m}", file=sys.stderr)
+                sys.exit(1)
+            measurements.append(make_measurement_dict(m, active_config))
+
+    # 2. Parse from text or JSON file
+    if args.data_file:
+        if not os.path.exists(args.data_file):
+            print(f"Error: Data file not found: {args.data_file}", file=sys.stderr)
+            sys.exit(1)
+            
+        if args.data_file.lower().endswith('.json'):
+            import json
+            try:
+                with open(args.data_file, 'r') as f:
+                    data_list = json.load(f)
+                for item in data_list:
+                    item_config = {
+                        'obs_type': item.get('obs_type', active_config['obs_type']),
+                        'flavor': item.get('flavor', active_config['flavor']),
+                        'xmin': float(item.get('xmin', active_config['xmin'])),
+                        'xmax': float(item.get('xmax', active_config['xmax'])),
+                        'nx': int(item.get('nx', active_config['nx'])),
+                        'weight_file': item.get('weight_file', active_config['weight_file']),
+                        'weight_func': item.get('weight_func', active_config['weight_func'])
+                    }
+                    vals = [
+                        float(item['x']),
+                        float(item['Q2']),
+                        float(item['value']),
+                        float(item['stat']),
+                        float(item.get('uncor_sys', 0.0))
+                    ]
+                    if 'cor_sys' in item:
+                        vals.extend([float(v) for v in item['cor_sys']])
+                    measurements.append(make_measurement_dict(vals, item_config))
+            except Exception as e:
+                print(f"Error parsing JSON data file: {e}", file=sys.stderr)
+                sys.exit(1)
+        else:
+            with open(args.data_file, 'r') as f:
+                for line in f:
+                    line_str = line.strip()
+                    if not line_str:
+                        continue
+                    if line_str.startswith('#') or line_str.startswith('*'):
+                        kv_pairs = re.findall(r'(\w+)\s*=\s*(?:"([^"]*)"|\'([^\']*)\'|([^\s]+))', line_str)
+                        for key, val1, val2, val3 in kv_pairs:
+                            val = val1 or val2 or val3
+                            key_lower = key.lower()
+                            if key_lower in active_config:
+                                if key_lower == 'nx':
+                                    active_config[key_lower] = int(val)
+                                elif key_lower in ['xmin', 'xmax']:
+                                    active_config[key_lower] = float(val)
+                                else:
+                                    active_config[key_lower] = val
+                        continue
+                        
+                    parts = line_str.replace(',', ' ').split()
+                    try:
+                        vals = [float(p) for p in parts]
+                        if len(vals) < 4:
+                            print(f"Warning: Ignoring malformed line: {line_str}", file=sys.stderr)
+                            continue
+                        measurements.append(make_measurement_dict(vals, active_config))
+                    except ValueError:
+                        print(f"Warning: Ignoring non-numeric line: {line_str}", file=sys.stderr)
+
+    if not measurements:
+        print("Error: No measurements supplied. Use --measurement or --data-file.", file=sys.stderr)
+        sys.exit(1)
+
+    return measurements
+
+def run_epump(epump_path, base_name):
+    """
+    Invokes the ePump compiled binary for a given base_name,
+    validates the exit status, and parses key profiling metrics from the .out file.
+    """
+    if not os.path.exists(epump_path):
+        print(f"Error: ePump binary not found at: {epump_path}", file=sys.stderr)
+        print("Please compile ePump or specify the correct path using --epump-path", file=sys.stderr)
+        sys.exit(1)
+        
+    print(f"Executing ePump profiling: {epump_path} {base_name} ...")
+    os.makedirs(base_name, exist_ok=True)
+    import subprocess
+    result = subprocess.run([epump_path, base_name], stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+    
+    if result.returncode != 0:
+        print(f"ePump execution failed with exit code {result.returncode}", file=sys.stderr)
+        print(f"STDOUT:\n{result.stdout}", file=sys.stderr)
+        print(f"STDERR:\n{result.stderr}", file=sys.stderr)
+        sys.exit(1)
+        
+    out_file = f"{base_name}.out"
+    if not os.path.exists(out_file):
+        print(f"Error: ePump output file {out_file} was not created.", file=sys.stderr)
+        sys.exit(1)
+        
+    print(f"ePump executed successfully. Parsing results from {out_file}...")
+    
+    chi2_old = None
+    chi2_new = None
+    
+    import re
+    with open(out_file, 'r') as f:
+        content = f.read()
+        
+    chi2_old_match = re.search(r'Total\s+Chi2\s*\(z=0\)\s*=\s*([\d\.]+)', content)
+    chi2_new_match = re.search(r'Total\s+Chi2\s*\(z=z0\)\s*=\s*([\d\.]+)', content)
+    
+    if chi2_old_match:
+        chi2_old = float(chi2_old_match.group(1))
+    if chi2_new_match:
+        chi2_new = float(chi2_new_match.group(1))
+        
+    old_preds = re.findall(r'Old\s+(\d+)\s+([\d\.E+-]+)\s+([\d\.E+-]+)', content)
+    new_preds = re.findall(r'New\s+(\d+)\s+([\d\.E+-]+)\s+([\d\.E+-]+)', content)
+    
+    print("\n============================================================")
+    print("                    E-PUMP PROFILING SUMMARY                 ")
+    print("============================================================")
+    if chi2_old is not None and chi2_new is not None:
+        print(f"Initial total Chi2 (before profiling): {chi2_old:.4f}")
+        print(f"Profiled total Chi2 (after profiling): {chi2_new:.4f}")
+        print(f"Delta Chi2 reduction:                 {chi2_old - chi2_new:.4f}")
+    
+    if old_preds and new_preds:
+        print("\nPredicted Observables & Uncertainties (Before vs After):")
+        print(f"  {'Obs ID':<8} | {'Original Value':<15} {'Original Error':<15} | {'Profiled Value':<15} {'Profiled Error':<15}")
+        print("-" * 80)
+        for old, new in zip(old_preds, new_preds):
+            obs_id = old[0]
+            old_val, old_err = float(old[1]), float(old[2])
+            new_val, new_err = float(new[1]), float(new[2])
+            print(f"  {obs_id:<8} | {old_val:<15.6e} {old_err:<15.6e} | {new_val:<15.6e} {new_err:<15.6e}")
+    print("============================================================\n")
+
+def report_pdf_comparison(original_set, original_members, updated_set, updated_members, measurements, args):
+    """
+    Computes original and updated observables for all members,
+    calculates their uncertainties using LHAPDF's built-in formulas,
+    and prints a detailed comparison report.
+    """
+    n_members = len(original_members)
+    n_obs = len(measurements)
+    
+    original_vals = np.zeros((n_members, n_obs))
+    updated_vals = np.zeros((n_members, n_obs))
+    
+    # Pre-parse flavor expressions and weight functions
+    parsed_flavors_cache = []
+    weight_funcs_cache = []
+    for m in measurements:
+        parsed_terms = parse_flavor_expression(m['flavor'])
+        parsed_flavors_cache.append(parsed_terms)
+        
+        w_func = load_weight_function(m['weight_file'], m['weight_func'])
+        weight_funcs_cache.append(w_func)
+        
+    for i in range(n_members):
+        orig_member = original_members[i]
+        upd_member = updated_members[i]
+        
+        for j, m in enumerate(measurements):
+            x_val = m['x']
+            Q2_val = m['Q2']
+            parsed_terms = parsed_flavors_cache[j]
+            weight_func = weight_funcs_cache[j]
+            
+            # Original observable calculation
+            if m['obs_type'] == 'point':
+                val_orig = evaluate_pdf_combination(orig_member, parsed_terms, x_val, Q2_val)
+            else:
+                val_orig = compute_integrated_moment(orig_member, parsed_terms, m['xmin'], m['xmax'], m['nx'], Q2_val, weight_func)
+            original_vals[i, j] = val_orig
+            
+            # Updated observable calculation
+            if m['obs_type'] == 'point':
+                val_upd = evaluate_pdf_combination(upd_member, parsed_terms, x_val, Q2_val)
+            else:
+                val_upd = compute_integrated_moment(upd_member, parsed_terms, m['xmin'], m['xmax'], m['nx'], Q2_val, weight_func)
+            updated_vals[i, j] = val_upd
+            
+    print("\n============================================================")
+    print("                PDF COMPARISON & UNCERTAINTY REPORT          ")
+    print("============================================================")
+    print(f"  {'Obs':<4} | {'Original (LHAPDF)':<30} | {'Profiled (LHAPDF)':<30}")
+    print(f"  {'ID':<4} | {'Central':<9} {'Err-':<9} {'Err+':<9} | {'Central':<9} {'Err-':<9} {'Err+':<9}")
+    print("-" * 80)
+    
+    for j, m in enumerate(measurements):
+        # Convert numpy array column to clean Python float list for LHAPDF Cython compatibility
+        orig_col = [float(x) for x in original_vals[:, j]]
+        upd_col = [float(x) for x in updated_vals[:, j]]
+        
+        orig_unc = original_set.uncertainty(orig_col)
+        upd_unc = updated_set.uncertainty(upd_col)
+        
+        print(f"  {j+1:<4} | {orig_unc.central:<9.5f} -{orig_unc.errminus:<8.5f} +{orig_unc.errplus:<8.5f} | "
+              f"{upd_unc.central:<9.5f} -{upd_unc.errminus:<8.5f} +{upd_unc.errplus:<8.5f}")
+    print("============================================================\n")
+
+def main():
+    args = parse_arguments()
+    measurements = parse_measurements(args)
+
+    print("--- Milestone 1 CLI Arguments Parsed Successfully ---")
+    print(f"PDF Set: {args.pdf}")
+    print(f"Measurements Parsed: {len(measurements)}")
+
+    print("\n--- Milestone 2 Core Computational Functions ---")
+    setup_lhapdf_path()
+    
+    print(f"Loading LHAPDF set '{args.pdf}'...")
+    try:
+        pdf_set = lhapdf.getPDFSet(args.pdf)
+        pdf_members = pdf_set.mkPDFs()
+        print(f"Successfully loaded '{args.pdf}' set with {len(pdf_members)} members.")
+    except Exception as e:
+        print(f"Error loading LHAPDF set '{args.pdf}': {e}", file=sys.stderr)
+        sys.exit(1)
+
+    print("\n--- Milestone 3 Dynamic File Generation ---")
+    
+    in_filepath = f"{args.name}.in"
+    data_filepath = f"{args.name}.data"
+    theory_filepath = f"{args.name}.theory"
+    
+    n_ev_pairs = (len(pdf_members) - 1) // 2
+    n_obs = len(measurements)
+    
+    print(f"Generating .in file: {in_filepath}")
+    generate_in_file(in_filepath, args.name, n_ev_pairs, n_obs, args.pdf)
+    
+    print(f"Generating .data file: {data_filepath}")
+    generate_data_file(data_filepath, measurements)
+    
+    print(f"Generating .theory file: {theory_filepath}...")
+    try:
+        generate_theory_file(theory_filepath, pdf_members, measurements, args)
+        print("Dynamic file generation completed successfully.")
+    except Exception as e:
+        print(f"Error generating theory file: {e}", file=sys.stderr)
+        sys.exit(1)
+
+    print("\n--- Milestone 4 ePump Invocation and Output Parsing ---")
+    epump_abs_path = os.path.abspath(args.epump_path)
+    if not os.path.exists(epump_abs_path):
+        epump_abs_path = os.path.abspath(os.path.join(SCRIPT_DIR, args.epump_path))
+        
+    run_epump(epump_abs_path, args.name)
+
+    print("\n--- Milestone 5 Comparison and Reporting ---")
+    print(f"Loading profiled PDF set '{args.name}'...")
+    try:
+        updated_set = lhapdf.getPDFSet(args.name)
+        updated_members = updated_set.mkPDFs()
+        print(f"Successfully loaded profiled set '{args.name}' with {len(updated_members)} members.")
+    except Exception as e:
+        print(f"Error loading profiled PDF set '{args.name}': {e}", file=sys.stderr)
+        sys.exit(1)
+        
+    report_pdf_comparison(pdf_set, pdf_members, updated_set, updated_members, measurements, args)
+
+if __name__ == '__main__':
+    main()
