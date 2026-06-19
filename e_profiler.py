@@ -145,15 +145,34 @@ def evaluate_pdf_combination(pdf_member, parsed_terms, x, Q2):
     # LHAPDF member xfxQ2 returns x * f(x, Q^2)
     return sum(coeff * pdf_member.xfxQ2(pid, x, Q2) for coeff, pid in parsed_terms)
 
-def compute_integrated_moment(pdf_member, parsed_terms, xmin, xmax, nx, Q2, weight_func=None):
+def compute_integrated_moment(pdf_member, parsed_terms, xmin, xmax, nx, Q2, weight_type='1', moment=0):
     """
-    Computes numerical moment integration over [xmin, xmax] using logarithmic x spacing and an optional weight function.
+    Computes numerical moment integration over [xmin, xmax] using logarithmic x spacing and specific weight functions.
     """
     x_grid = 10**np.linspace(np.log10(xmin), np.log10(xmax), nx)
-    y_values = np.array([evaluate_pdf_combination(pdf_member, parsed_terms, x, Q2) for x in x_grid])
     
-    if weight_func is not None:
-        y_values = y_values * np.array([weight_func(x) for x in x_grid])
+    # Evaluate flavor combination: returns x * f(x, Q^2)
+    xf_values = np.array([evaluate_pdf_combination(pdf_member, parsed_terms, x, Q2) for x in x_grid])
+    
+    if weight_type == 'gaussian':
+        mean = (xmin + xmax) / 2.0
+        sigma = (xmax - xmin) / 2.0
+        
+        if sigma == 0:
+            norm = 0.0
+        else:
+            norm = np.sqrt((moment**2) / (2.0 * np.pi * (sigma**2)))
+            
+        if sigma == 0:
+            gaussian_weights = np.zeros_like(x_grid)
+        else:
+            gaussian_weights = norm * np.exp(- (moment**2) * ((x_grid - mean)**2) / (2.0 * (sigma**2)))
+            
+        # Replaces x^n completely: Integrand = Gaussian(x) * f(x) = Gaussian(x) * (x*f(x)) / x
+        y_values = gaussian_weights * (xf_values / x_grid)
+    else:
+        # Default weight: Integrand = x^n * f(x) = x^{n-1} * (x*f(x))
+        y_values = (x_grid**(moment - 1)) * xf_values
         
     # Trapezoidal integration
     integral = np.sum((y_values[1:] + y_values[:-1]) * np.diff(x_grid)) / 2.0
@@ -168,45 +187,9 @@ def compute_observable(pdf_set_members, parsed_terms, args):
         if args.obs_type == 'point':
             val = evaluate_pdf_combination(member, parsed_terms, args.x, args.Q2)
         else:
-            val = compute_integrated_moment(member, parsed_terms, args.xmin, args.xmax, args.nx, args.Q2)
+            val = compute_integrated_moment(member, parsed_terms, args.xmin, args.xmax, args.nx, args.Q2, args.weight, args.moment)
         results.append(val)
     return np.array(results)
-
-def load_weight_function(python_file_path, func_name):
-    """
-    Dynamically loads a function from a specified python file.
-    """
-    if not python_file_path or not func_name:
-        return None
-        
-    if not os.path.exists(python_file_path):
-        raise FileNotFoundError(f"Weight function file not found: {python_file_path}")
-        
-    import importlib.util
-    import sys
-    
-    abs_path = os.path.abspath(python_file_path)
-    module_name = "aux_weight_functions"
-    
-    spec = importlib.util.spec_from_file_location(module_name, abs_path)
-    if spec is None or spec.loader is None:
-        raise ImportError(f"Could not load spec for python file: {python_file_path}")
-        
-    module = importlib.util.module_from_spec(spec)
-    sys.modules[module_name] = module
-    try:
-        spec.loader.exec_module(module)
-    except Exception as e:
-        raise ImportError(f"Error executing python file {python_file_path}: {e}")
-        
-    if not hasattr(module, func_name):
-        raise AttributeError(f"Function '{func_name}' not found in file: {python_file_path}")
-        
-    func = getattr(module, func_name)
-    if not callable(func):
-        raise TypeError(f"'{func_name}' in {python_file_path} is not a callable function.")
-        
-    return func
 
 def generate_theory_file(filepath, pdf_members, measurements, args):
     """
@@ -220,25 +203,23 @@ def generate_theory_file(filepath, pdf_members, measurements, args):
     Ms = np.zeros((n_members, n_obs))
     
     parsed_flavors_cache = []
-    weight_funcs_cache = []
     for m in measurements:
         parsed_terms = parse_flavor_expression(m['flavor'])
         parsed_flavors_cache.append(parsed_terms)
-        
-        w_func = load_weight_function(m['weight_file'], m['weight_func'])
-        weight_funcs_cache.append(w_func)
         
     for i, member in enumerate(pdf_members):
         for j, m in enumerate(measurements):
             x_val = m['x']
             Q2_val = m['Q2']
             parsed_terms = parsed_flavors_cache[j]
-            weight_func = weight_funcs_cache[j]
             
             if m['obs_type'] == 'point':
                 val = evaluate_pdf_combination(member, parsed_terms, x_val, Q2_val)
             else:
-                val = compute_integrated_moment(member, parsed_terms, m['xmin'], m['xmax'], m['nx'], Q2_val, weight_func)
+                val = compute_integrated_moment(
+                    member, parsed_terms, m['xmin'], m['xmax'], m['nx'], Q2_val,
+                    weight_type=m['weight'], moment=m['moment']
+                )
             Ms[i, j] = val
             
     with open(filepath, "w") as f:
@@ -302,10 +283,10 @@ def parse_arguments():
                         help='Scale Q^2 for evaluation in GeV^2.')
     parser.add_argument('--flavor', type=str, default='u-d',
                         help='Algebraic linear combination of PDF flavors (e.g., "u-d", "2*u - 1.5*d", "ubar - dbar").')
-    parser.add_argument('--weight-file', type=str, default=None,
-                        help='Path to a python file (.py) containing custom weight function definitions.')
-    parser.add_argument('--weight-func', type=str, default=None,
-                        help='Name of the weight function within the weight-file to convolute against.')
+    parser.add_argument('--weight', type=str, choices=['1', 'gaussian'], default='1',
+                        help='Weight function definition to use. "1" for default x^n weight, "gaussian" for a normalized gaussian.')
+    parser.add_argument('--moment', type=int, default=0,
+                        help='Number of the moment (n) to calculate.')
 
     # Measurement/Data Options
     parser.add_argument('--measurement', action='append', nargs='+', type=float,
@@ -325,7 +306,7 @@ def parse_measurements(args):
     """
     Parses and merges measurements from CLI flags and/or external files (JSON or text).
     Returns a list of dictionaries, where each measurement dictionary has keys:
-    'x', 'Q2', 'value', 'stat', 'uncor_sys', 'cor_sys', 'obs_type', 'flavor', 'xmin', 'xmax', 'nx', 'weight_expr', 'weight_file'
+    'x', 'Q2', 'value', 'stat', 'uncor_sys', 'cor_sys', 'obs_type', 'flavor', 'xmin', 'xmax', 'nx', 'weight', 'moment'
     """
     measurements = []
 
@@ -335,8 +316,8 @@ def parse_measurements(args):
         'xmin': args.xmin,
         'xmax': args.xmax,
         'nx': args.nx,
-        'weight_file': args.weight_file,
-        'weight_func': args.weight_func
+        'weight': args.weight,
+        'moment': args.moment
     }
 
     def make_measurement_dict(vals, config):
@@ -356,8 +337,8 @@ def parse_measurements(args):
             'xmin': config['xmin'],
             'xmax': config['xmax'],
             'nx': config['nx'],
-            'weight_file': config['weight_file'],
-            'weight_func': config['weight_func']
+            'weight': config['weight'],
+            'moment': config['moment']
         }
 
     # 1. Parse from repeatable CLI flags (use global CLI configs)
@@ -386,8 +367,8 @@ def parse_measurements(args):
                         'xmin': float(item.get('xmin', active_config['xmin'])),
                         'xmax': float(item.get('xmax', active_config['xmax'])),
                         'nx': int(item.get('nx', active_config['nx'])),
-                        'weight_file': item.get('weight_file', active_config['weight_file']),
-                        'weight_func': item.get('weight_func', active_config['weight_func'])
+                        'weight': item.get('weight', active_config['weight']),
+                        'moment': int(item.get('moment', active_config['moment']))
                     }
                     vals = [
                         float(item['x']),
@@ -414,7 +395,7 @@ def parse_measurements(args):
                             val = val1 or val2 or val3
                             key_lower = key.lower()
                             if key_lower in active_config:
-                                if key_lower == 'nx':
+                                if key_lower == 'nx' or key_lower == 'moment':
                                     active_config[key_lower] = int(val)
                                 elif key_lower in ['xmin', 'xmax']:
                                     active_config[key_lower] = float(val)
@@ -515,15 +496,11 @@ def report_pdf_comparison(original_set, original_members, updated_set, updated_m
     original_vals = np.zeros((n_members, n_obs))
     updated_vals = np.zeros((n_members, n_obs))
     
-    # Pre-parse flavor expressions and weight functions
+    # Pre-parse flavor expressions
     parsed_flavors_cache = []
-    weight_funcs_cache = []
     for m in measurements:
         parsed_terms = parse_flavor_expression(m['flavor'])
         parsed_flavors_cache.append(parsed_terms)
-        
-        w_func = load_weight_function(m['weight_file'], m['weight_func'])
-        weight_funcs_cache.append(w_func)
         
     for i in range(n_members):
         orig_member = original_members[i]
@@ -533,20 +510,25 @@ def report_pdf_comparison(original_set, original_members, updated_set, updated_m
             x_val = m['x']
             Q2_val = m['Q2']
             parsed_terms = parsed_flavors_cache[j]
-            weight_func = weight_funcs_cache[j]
             
             # Original observable calculation
             if m['obs_type'] == 'point':
                 val_orig = evaluate_pdf_combination(orig_member, parsed_terms, x_val, Q2_val)
             else:
-                val_orig = compute_integrated_moment(orig_member, parsed_terms, m['xmin'], m['xmax'], m['nx'], Q2_val, weight_func)
+                val_orig = compute_integrated_moment(
+                    orig_member, parsed_terms, m['xmin'], m['xmax'], m['nx'], Q2_val,
+                    weight_type=m['weight'], moment=m['moment']
+                )
             original_vals[i, j] = val_orig
             
             # Updated observable calculation
             if m['obs_type'] == 'point':
                 val_upd = evaluate_pdf_combination(upd_member, parsed_terms, x_val, Q2_val)
             else:
-                val_upd = compute_integrated_moment(upd_member, parsed_terms, m['xmin'], m['xmax'], m['nx'], Q2_val, weight_func)
+                val_upd = compute_integrated_moment(
+                    upd_member, parsed_terms, m['xmin'], m['xmax'], m['nx'], Q2_val,
+                    weight_type=m['weight'], moment=m['moment']
+                )
             updated_vals[i, j] = val_upd
             
     print("\n============================================================")
@@ -629,6 +611,14 @@ def main():
         sys.exit(1)
         
     report_pdf_comparison(pdf_set, pdf_members, updated_set, updated_members, measurements, args)
+    
+    print("\n============================================================")
+    print("                    POSTERIOR PDF STORAGE SUMMARY            ")
+    print("============================================================")
+    print(f"  Posterior PDFs successfully generated!")
+    print(f"  Study Label (Input Label): {args.name}")
+    print(f"  Saved LHAPDF Directory:    {os.path.abspath(args.name)}")
+    print("============================================================\n")
 
 if __name__ == '__main__':
     main()
