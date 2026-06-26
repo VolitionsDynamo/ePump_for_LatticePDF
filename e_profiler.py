@@ -7,12 +7,16 @@ import sys
 import os
 import argparse
 import re
+import tempfile
+import shutil
+import atexit
 import numpy as np
 import lhapdf
 
 # Find relative path of default LHAPDF examples in the repository
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 LATTICE_TEST_DIR = os.path.abspath(os.path.join(SCRIPT_DIR, 'ePump_kp20221218', 'lattice_moment_test1'))
+MC2H_SRC = os.path.join(SCRIPT_DIR, 'mc2hessian', 'src')
 
 def setup_lhapdf_path(custom_path=None):
     """
@@ -78,6 +82,228 @@ def ensure_pdf_symlink(pdf_name):
             except Exception as e:
                 print(f"Warning: Failed to create symlink: {e}", file=sys.stderr)
 
+def detect_pdf_error_type(pdf_name):
+    """
+    Reads the LHAPDF .info file for pdf_name and returns the ErrorType string.
+    Returns one of: 'hessian', 'symmhessian', 'replicas', or 'unknown'.
+    """
+    pdf_dir = find_pdf_dir(pdf_name)
+    if pdf_dir is None:
+        print(f"Warning: Could not locate PDF set '{pdf_name}' to check ErrorType.", file=sys.stderr)
+        return 'unknown'
+
+    info_path = os.path.join(pdf_dir, f"{pdf_name}.info")
+    if not os.path.exists(info_path):
+        print(f"Warning: No .info file found at {info_path}", file=sys.stderr)
+        return 'unknown'
+
+    with open(info_path, 'r') as f:
+        for line in f:
+            if line.strip().startswith('ErrorType:'):
+                return line.split(':', 1)[1].strip().lower()
+    return 'unknown'
+
+
+def _import_mc2hlib():
+    """Imports mc2hlib, handling the fastcache dependency gracefully."""
+    if MC2H_SRC not in sys.path:
+        sys.path.insert(0, MC2H_SRC)
+    try:
+        import fastcache
+    except ImportError:
+        import functools
+        import types
+        fastcache_mod = types.ModuleType('fastcache')
+        fastcache_mod.lru_cache = functools.lru_cache
+        sys.modules['fastcache'] = fastcache_mod
+
+    from mc2hlib.common import load_pdf, compress_X_abs, get_limits
+    from mc2hlib.lh import hessian_from_lincomb, load_replica_2, write_replica
+    return load_pdf, compress_X_abs, get_limits, hessian_from_lincomb, load_replica_2, write_replica
+
+
+def expand_symm_to_asymm(set_dir, set_name, neig):
+    """
+    Expands a symmetric Hessian set (neig+1 members) to asymmetric +/- pairs
+    (2*neig+1 members) as required by ePump.
+    """
+    _, _, _, _, load_replica_2, write_replica = _import_mc2hlib()
+
+    base = os.path.join(set_dir, set_name)
+
+    # Read central member grids
+    central_header, central_grids = load_replica_2(0, base)
+
+    # Process in reverse to avoid filename collisions
+    for k in range(neig, 0, -1):
+        _, grids_k = load_replica_2(k, base)
+
+        # Compute minus direction: 2*central - plus
+        grids_minus = central_grids.multiply(2).subtract(grids_k)
+
+        # Rename original file k -> 2k-1 (plus direction)
+        old_path = f"{base}_{k:04d}.dat"
+        plus_path = f"{base}_{(2*k-1):04d}.dat"
+        os.rename(old_path, plus_path)
+
+        # Write minus direction as member 2k
+        hess_header = b"PdfType: error\nFormat: lhagrid1\n"
+        write_replica(2*k, base, hess_header, grids_minus)
+
+    # Update .info file
+    info_path = f"{base}.info"
+    with open(info_path, 'r') as f:
+        lines = f.readlines()
+    with open(info_path, 'w') as f:
+        for line in lines:
+            if line.strip().startswith('NumMembers:'):
+                f.write(f"NumMembers: {2*neig + 1}\n")
+            elif line.strip().startswith('ErrorType:'):
+                f.write("ErrorType: hessian\n")
+            else:
+                f.write(line)
+
+    print(f"  Expanded symmetric Hessian ({neig+1} members) to asymmetric pairs ({2*neig+1} members).")
+
+
+def convert_mc_to_hessian(pdf_name, neig=50, Q=1.0, epsilon=1000.0,
+                          output_dir=None, max_nf=3):
+    """
+    Converts an MC replica PDF set to an asymmetric Hessian set compatible with ePump.
+    Returns (converted_set_name, converted_set_dir).
+    """
+    load_pdf, compress_X_abs, get_limits, hessian_from_lincomb, _, _ = _import_mc2hlib()
+
+    print(f"  MC-to-Hessian conversion at Q = {Q} GeV, neig = {neig}, epsilon = {epsilon}")
+
+    # Ensure the PDF set's parent dir is first in LHAPDF_DATA_PATH so
+    # hessian_from_lincomb (which reads from lhapdf.paths()[0]) can find it.
+    pdf_dir = find_pdf_dir(pdf_name)
+    if pdf_dir:
+        parent_dir = os.path.dirname(pdf_dir)
+        current = os.environ.get('LHAPDF_DATA_PATH', '')
+        os.environ['LHAPDF_DATA_PATH'] = parent_dir + ':' + current
+        lhapdf.setPaths([parent_dir] + lhapdf.paths())
+
+    # Step 1: Load PDF and build covariance matrix
+    pdf, fl, xgrid = load_pdf(pdf_name, Q, max_nf, False)
+    nx, nf = xgrid.n, fl.n
+    X = (pdf.xfxQ.reshape(pdf.n_rep, nx * nf) - pdf.f0.reshape(nx * nf)).T
+
+    # Epsilon masking
+    l = get_limits(X.T)
+    diff = (l.up1s - l.low1s) / 2
+    std = np.std(X, axis=1)
+    mask = (np.abs((diff - std) / diff) < epsilon)
+    print(f"  Keeping {np.count_nonzero(mask)} / {len(mask)} points (epsilon = {epsilon})")
+    X = X[mask, :]
+
+    # Step 2: SVD compression
+    vec, cov = compress_X_abs(X, neig)
+
+    # Step 3: Export symmetric Hessian set
+    set_name = f"{pdf_name}_hessian_{neig}"
+    hessian_from_lincomb(pdf, vec, set_name=set_name, folder=output_dir)
+    print(f"  Symmetric Hessian set written to {os.path.join(output_dir or '', set_name)}/")
+
+    # Step 4: Expand symmetric -> asymmetric pairs for ePump
+    set_dir = os.path.join(output_dir or '', set_name)
+    expand_symm_to_asymm(set_dir, set_name, neig)
+
+    return set_name, os.path.abspath(set_dir)
+
+
+def run_closure_test(mc_pdf_name, hessian_pdf_name, measurements, args):
+    """
+    Compares uncertainty bands between the original MC set and the converted
+    Hessian set to validate the conversion.
+    """
+    print("\n============================================================")
+    print("              MC-TO-HESSIAN CLOSURE TEST                     ")
+    print("============================================================")
+
+    # Load both sets
+    mc_set = lhapdf.getPDFSet(mc_pdf_name)
+    mc_members = mc_set.mkPDFs()
+    hess_set = lhapdf.getPDFSet(hessian_pdf_name)
+    hess_members = hess_set.mkPDFs()
+
+    n_mc = len(mc_members)
+    n_hess = len(hess_members)
+    n_obs = len(measurements)
+
+    mc_vals = np.zeros((n_mc, n_obs))
+    hess_vals = np.zeros((n_hess, n_obs))
+
+    parsed_flavors_cache = []
+    for m in measurements:
+        parsed_flavors_cache.append(parse_flavor_expression(m['flavor']))
+
+    for i, member in enumerate(mc_members):
+        print(f"\r  MC member {i+1}/{n_mc}", end="", flush=True)
+        for j, m in enumerate(measurements):
+            parsed_terms = parsed_flavors_cache[j]
+            if m['obs_type'] == 'point':
+                mc_vals[i, j] = evaluate_pdf_combination(member, parsed_terms, m['x'], m['Q2'])
+            else:
+                mc_vals[i, j] = compute_integrated_moment(
+                    member, parsed_terms, m['xmin'], m['xmax'], m['nx'], m['Q2'],
+                    weight_type=m['weight'], moment=m['moment'])
+    print()
+
+    for i, member in enumerate(hess_members):
+        print(f"\r  Hessian member {i+1}/{n_hess}", end="", flush=True)
+        for j, m in enumerate(measurements):
+            parsed_terms = parsed_flavors_cache[j]
+            if m['obs_type'] == 'point':
+                hess_vals[i, j] = evaluate_pdf_combination(member, parsed_terms, m['x'], m['Q2'])
+            else:
+                hess_vals[i, j] = compute_integrated_moment(
+                    member, parsed_terms, m['xmin'], m['xmax'], m['nx'], m['Q2'],
+                    weight_type=m['weight'], moment=m['moment'])
+    print()
+
+    CENTRAL_TOL = 0.05
+    SIGMA_TOL_LOW = 0.90
+    SIGMA_TOL_HIGH = 1.10
+
+    print(f"  {'Obs':<4} | {'MC Central':<12} {'MC Err':<12} | {'Hess Central':<12} {'Hess Err':<12} | {'C Ratio':<8} {'E Ratio':<8} | Result")
+    print("-" * 100)
+
+    all_pass = True
+    for j in range(n_obs):
+        # MC: central = mean of replicas (skip member 0), error = std
+        mc_central = np.mean(mc_vals[1:, j])
+        mc_sigma = np.std(mc_vals[1:, j], ddof=1)
+
+        # Hessian: use LHAPDF uncertainty
+        hess_col = [float(v) for v in hess_vals[:, j]]
+        hess_unc = hess_set.uncertainty(hess_col)
+        hess_central = hess_unc.central
+        hess_sigma = (hess_unc.errplus + hess_unc.errminus) / 2.0
+
+        central_ratio = abs(hess_central - mc_central) / (abs(mc_central) + 1e-30)
+        sigma_ratio = hess_sigma / (mc_sigma + 1e-30)
+
+        c_ok = central_ratio < CENTRAL_TOL
+        e_ok = SIGMA_TOL_LOW <= sigma_ratio <= SIGMA_TOL_HIGH
+        status = "PASS" if (c_ok and e_ok) else "FAIL"
+        if status == "FAIL":
+            all_pass = False
+
+        print(f"  {j+1:<4} | {mc_central:<12.6f} {mc_sigma:<12.6f} | "
+              f"{hess_central:<12.6f} {hess_sigma:<12.6f} | "
+              f"{central_ratio:<8.4f} {sigma_ratio:<8.4f} | {status}")
+
+    print("----")
+    if all_pass:
+        print("  Closure test PASSED. MC and Hessian uncertainties agree within tolerance.")
+    else:
+        print("  Closure test FAILED for some observables. Proceeding anyway — review results above.")
+    print("============================================================\n")
+    return all_pass
+
+
 def generate_in_file(filepath, base_name, n_ev_pairs, n_obs, pdf_name):
     """
     Writes the .in control file for ePump.
@@ -92,7 +318,7 @@ def generate_in_file(filepath, base_name, n_ev_pairs, n_obs, pdf_name):
         f.write("+++ ObservableFile                    N(Observables)  Data?(Y/N)      Error_type     Weight          \n")
         f.write(f"        {base_name:<36}{n_obs:<16}Y                4           1\n")
         f.write("+++     PDFname                       PDFout   \n")
-        f.write(f"     {pdf_in_path:<36}{pdf_out_path}\n")
+        f.write(f"     {pdf_in_path}    {pdf_out_path}\n")
         f.write("# Generated dynamically by e_profiler.py\n")
 
 def parse_flavor_expression(expression):
@@ -299,6 +525,22 @@ def parse_arguments():
                         help='Output base name for ePump input/output files.')
     parser.add_argument('--epump-path', type=str, default='./ePump_kp20221218/src/UpdatePDFs',
                         help='Path to the compiled UpdatePDFs binary.')
+
+    # MC-to-Hessian conversion options
+    parser.add_argument('--mc2h-neig', type=int, default=50,
+                        help='Number of eigenvectors for MC-to-Hessian conversion.')
+    parser.add_argument('--mc2h-Q', type=float, default=1.0,
+                        help='Energy scale Q (GeV) for MC-to-Hessian conversion.')
+    parser.add_argument('--mc2h-epsilon', type=float, default=1000.0,
+                        help='Epsilon tolerance for mc2hessian point selection.')
+    parser.add_argument('--mc2h-max-nf', type=int, default=3,
+                        help='Max number of active flavors for mc2hessian.')
+    parser.add_argument('--mc2h-output-dir', type=str, default=None,
+                        help='Directory for converted Hessian set (default: auto temp dir).')
+    parser.add_argument('--force-mc2h', action='store_true',
+                        help='Force MC-to-Hessian conversion even if the set appears to be Hessian.')
+    parser.add_argument('--closure-test', action='store_true',
+                        help='Run closure test comparing MC and converted Hessian uncertainties.')
 
     return parser.parse_args()
 
@@ -560,7 +802,50 @@ def main():
 
     print("\n--- Milestone 2 Core Computational Functions ---")
     setup_lhapdf_path()
-    
+
+    # Detect PDF error type and convert MC replicas if needed
+    original_pdf_name = args.pdf
+    temp_dir = None
+
+    error_type = detect_pdf_error_type(args.pdf)
+    print(f"Detected ErrorType for '{args.pdf}': {error_type}")
+
+    if error_type in ('replicas', 'mc') or args.force_mc2h:
+        if error_type not in ('replicas', 'mc'):
+            print(f"Note: --force-mc2h specified but ErrorType is '{error_type}'.")
+
+        if args.mc2h_output_dir:
+            output_dir = os.path.abspath(args.mc2h_output_dir)
+            os.makedirs(output_dir, exist_ok=True)
+        else:
+            temp_dir = tempfile.mkdtemp(prefix='epump_mc2h_')
+            atexit.register(lambda d=temp_dir: shutil.rmtree(d, ignore_errors=True))
+            output_dir = temp_dir
+
+        print(f"Converting MC replica set '{args.pdf}' to Hessian form...")
+        converted_name, converted_path = convert_mc_to_hessian(
+            pdf_name=args.pdf,
+            neig=args.mc2h_neig,
+            Q=args.mc2h_Q,
+            epsilon=args.mc2h_epsilon,
+            output_dir=output_dir,
+            max_nf=args.mc2h_max_nf
+        )
+
+        # Register converted set directory so LHAPDF can find it
+        setup_lhapdf_path(custom_path=output_dir)
+
+        if args.closure_test:
+            run_closure_test(original_pdf_name, converted_name, measurements, args)
+
+        args.pdf = converted_name
+        print(f"Using converted Hessian set '{converted_name}' for profiling.")
+
+    elif error_type in ('hessian', 'symmhessian'):
+        print(f"PDF set '{args.pdf}' is Hessian-type. No conversion needed.")
+    else:
+        print(f"Warning: Could not determine ErrorType for '{args.pdf}'. Proceeding without conversion.")
+
     print(f"Loading LHAPDF set '{args.pdf}'...")
     try:
         pdf_set = lhapdf.getPDFSet(args.pdf)

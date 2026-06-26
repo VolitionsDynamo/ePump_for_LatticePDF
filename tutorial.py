@@ -42,9 +42,71 @@ pdf_members = pdf_set.mkPDFs()
 print(f"Loaded '{pdf_set_name}' with {len(pdf_members)} members successfully.")
 
 # ==========================================
-# CELL 3: Parsing Flavor Expressions & Point Evaluation
+# CELL 3: MC-to-Hessian Detection and Conversion
 # ==========================================
-print("\n--- Step 3: Parsing Flavor Expressions & Point Evaluation ---")
+print("\n--- Step 3: MC-to-Hessian Detection and Conversion ---")
+from e_profiler import detect_pdf_error_type, convert_mc_to_hessian
+import tempfile
+
+# Check the current set (CT18NNLO is already Hessian)
+error_type = detect_pdf_error_type(pdf_set_name)
+print(f"ErrorType for '{pdf_set_name}': {error_type}")
+
+# Now demonstrate conversion with an MC replica set
+mc_pdf_name = "NNPDF23_lo_as_0130_qed"
+mc_error_type = detect_pdf_error_type(mc_pdf_name)
+print(f"ErrorType for '{mc_pdf_name}': {mc_error_type}")
+
+mc2h_output_dir = tempfile.mkdtemp(prefix='epump_mc2h_')
+converted_name, converted_path = convert_mc_to_hessian(
+    pdf_name=mc_pdf_name,
+    neig=50,
+    Q=1.0,
+    epsilon=1000.0,
+    output_dir=mc2h_output_dir,
+    max_nf=3
+)
+print(f"Converted set: '{converted_name}' at {converted_path}")
+
+setup_lhapdf_path(custom_path=mc2h_output_dir)
+hess_set = lhapdf.getPDFSet(converted_name)
+hess_members = hess_set.mkPDFs()
+print(f"Loaded converted set with {len(hess_members)} members (expected {2*50+1}=101)")
+
+# ==========================================
+# CELL 4: MC-to-Hessian Closure Test
+# ==========================================
+print("\n--- Step 4: Closure Test ---")
+from e_profiler import run_closure_test
+
+xmin, xmax, nx = 0.1, 0.7, 100
+measurements_for_test = [{
+    'x': 0.5, 'Q2': 4.0, 'value': 0.151, 'stat': 0.040,
+    'uncor_sys': 0.0, 'cor_sys': [],
+    'obs_type': 'moment', 'flavor': 'u-d',
+    'xmin': xmin, 'xmax': xmax, 'nx': nx,
+    'weight': '1', 'moment': 0
+}]
+
+class DummyArgs:
+    obs_type = 'moment'
+    xmin = xmin
+    xmax = xmax
+    nx = nx
+    Q2 = 4.0
+    flavor = 'u-d'
+    weight = '1'
+    moment = 0
+
+run_closure_test(mc_pdf_name, converted_name, measurements_for_test, DummyArgs())
+
+import shutil
+shutil.rmtree(mc2h_output_dir, ignore_errors=True)
+
+# ==========================================
+# CELL 5: Parsing Flavor Expressions & Point Evaluation
+# ==========================================
+print("\n--- Step 5: Parsing Flavor Expressions & Point Evaluation ---")
 # Parse flavor expression u - d (flavor name -> PID conversion)
 expression = "u - d"
 parsed_terms = parse_flavor_expression(expression)
@@ -57,10 +119,9 @@ val_point = evaluate_pdf_combination(pdf_members[0], parsed_terms, x_val, Q2_val
 print(f"Value at x={x_val}, Q2={Q2_val}: {val_point:.6f}")
 
 # ==========================================
-# CELL 4: Computing Moments and Specific Weight Functions
+# CELL 6: Computing Moments and Specific Weight Functions
 # ==========================================
-print("\n--- Step 4: Integrated Moments & Specific Weight Functions ---")
-xmin, xmax, nx = 0.1, 0.7, 100
+print("\n--- Step 6: Integrated Moments & Specific Weight Functions ---")
 
 # Compute integrated moment with default weight ('1') and moment n=0
 val_moment_0 = compute_integrated_moment(
@@ -102,9 +163,9 @@ val_gaussian = compute_integrated_moment(
 print(f"Integrated Moment (weight='gaussian', n=1) on [{xmin}, {xmax}]: {val_gaussian:.6f}")
 
 # ==========================================
-# CELL 5: Defining and Parsing Measurements
+# CELL 7: Defining and Parsing Measurements
 # ==========================================
-print("\n--- Step 5: Defining and Parsing Measurements ---")
+print("\n--- Step 7: Defining and Parsing Measurements ---")
 # Define pseudodata measurements in dict format compatible with the generators.
 # Format: [x, Q2, value, statistical_error, uncor_sys, cor_sys...]
 raw_measurement = [0.5, 2.0, 0.151, 0.040, 0.0]
@@ -127,9 +188,9 @@ measurements = [{
 print("Measurement Configuration:", measurements[0])
 
 # ==========================================
-# CELL 6: Dynamic File Generation
+# CELL 8: Dynamic File Generation
 # ==========================================
-print("\n--- Step 6: Dynamic ePump File Generation ---")
+print("\n--- Step 8: Dynamic ePump File Generation ---")
 run_name = "tutorial_demo"
 
 in_file = f"{run_name}.in"
@@ -161,17 +222,17 @@ generate_theory_file(theory_file, pdf_members, measurements, DummyArgs())
 print("All files generated successfully.")
 
 # ==========================================
-# CELL 7: Running ePump Profiling
+# CELL 9: Running ePump Profiling
 # ==========================================
-print("\n--- Step 7: Executing ePump Profiling ---")
+print("\n--- Step 9: Executing ePump Profiling ---")
 # Path to compiled UpdatePDFs binary
 epump_bin_path = "/home/daniel/ePump/ePump_for_LatticePDF/ePump_kp20221218/src/UpdatePDFs"
 run_epump(epump_bin_path, run_name)
 
 # ==========================================
-# CELL 8: Loading Profiled PDFs & Reporting Comparison
+# CELL 10: Loading Profiled PDFs & Reporting Comparison
 # ==========================================
-print("\n--- Step 8: PDF Uncertainty Comparison & Reporting ---")
+print("\n--- Step 10: PDF Uncertainty Comparison & Reporting ---")
 # Load profiled PDF set that was generated during step 7
 profiled_set = lhapdf.getPDFSet(run_name)
 profiled_members = profiled_set.mkPDFs()
