@@ -792,6 +792,106 @@ def report_pdf_comparison(original_set, original_members, updated_set, updated_m
               f"{upd_unc.central:<9.5f} -{upd_unc.errminus:<8.5f} +{upd_unc.errplus:<8.5f}")
     print("============================================================\n")
 
+_DEFAULT_EPUMP_PATH = os.path.join(SCRIPT_DIR, 'ePump_kp20221218', 'src', 'UpdatePDFs')
+
+class EProfiler:
+    """High-level interface for the ePump PDF profiling pipeline.
+
+    Loads the PDF set on construction so subsequent calls are self-contained.
+    For MC replica sets, call convert_to_hessian() before generate_files().
+    All file I/O is relative to the working directory at the time of the call.
+
+    Typical usage (Hessian set)::
+
+        ep = EProfiler("CT18NNLO", "my_run")
+        ep.add_measurement(x=0.5, Q2=4.0, value=0.151, stat=0.040,
+                           obs_type='moment', flavor='u-d',
+                           xmin=0.1, xmax=0.7, nx=100)
+        ep.generate_files()
+        ep.run()
+        ep.report()
+    """
+
+    def __init__(self, pdf_set_name, run_name, epump_path=None):
+        self.pdf_set_name = pdf_set_name
+        self.run_name = run_name
+        self.epump_path = os.path.abspath(epump_path or _DEFAULT_EPUMP_PATH)
+        self.measurements = []
+        self.profiled_set = None
+        self.profiled_members = None
+        setup_lhapdf_path()
+        self.pdf_set = lhapdf.getPDFSet(pdf_set_name)
+        self.pdf_members = self.pdf_set.mkPDFs()
+
+    def add_measurement(self, x, Q2, value, stat,
+                        uncor_sys=0.0, cor_sys=None,
+                        obs_type='moment', flavor='u-d',
+                        xmin=0.1, xmax=0.9, nx=100,
+                        weight='1', moment=0):
+        """Append a measurement. All measurements must have equal-length cor_sys lists."""
+        self.measurements.append({
+            'x': float(x), 'Q2': float(Q2),
+            'value': float(value), 'stat': float(stat),
+            'uncor_sys': float(uncor_sys),
+            'cor_sys': list(cor_sys) if cor_sys is not None else [],
+            'obs_type': obs_type, 'flavor': flavor,
+            'xmin': float(xmin), 'xmax': float(xmax),
+            'nx': int(nx), 'weight': weight, 'moment': int(moment),
+        })
+
+    def convert_to_hessian(self, neig=50, Q=1.0, epsilon=1000.0,
+                           output_dir=None, max_nf=3):
+        """Convert an MC replica PDF set to asymmetric Hessian format in-place.
+
+        If the current set is already Hessian, this is a no-op. When output_dir
+        is None, a temporary directory is created and cleaned up at process exit.
+        """
+        error_type = detect_pdf_error_type(self.pdf_set_name)
+        if error_type not in ('replicas', 'mc'):
+            print(f"PDF '{self.pdf_set_name}' is already '{error_type}'; skipping conversion.")
+            return
+        if output_dir is None:
+            import tempfile, atexit, shutil
+            output_dir = tempfile.mkdtemp(prefix='epump_mc2h_')
+            atexit.register(lambda d=output_dir: shutil.rmtree(d, ignore_errors=True))
+        else:
+            os.makedirs(output_dir, exist_ok=True)
+        converted_name, _ = convert_mc_to_hessian(
+            self.pdf_set_name, neig=neig, Q=Q,
+            epsilon=epsilon, output_dir=output_dir, max_nf=max_nf
+        )
+        setup_lhapdf_path(custom_path=output_dir)
+        self.pdf_set_name = converted_name
+        self.pdf_set = lhapdf.getPDFSet(converted_name)
+        self.pdf_members = self.pdf_set.mkPDFs()
+
+    def generate_files(self):
+        """Write the .in, .data, and .theory files for ePump."""
+        if not self.measurements:
+            raise ValueError("No measurements added; call add_measurement() first.")
+        n_ev_pairs = (len(self.pdf_members) - 1) // 2
+        generate_in_file(f"{self.run_name}.in", self.run_name,
+                         n_ev_pairs, len(self.measurements), self.pdf_set_name)
+        generate_data_file(f"{self.run_name}.data", self.measurements)
+        generate_theory_file(f"{self.run_name}.theory",
+                             self.pdf_members, self.measurements, self)
+
+    def run(self):
+        """Run the ePump binary and load the profiled PDF set."""
+        run_epump(self.epump_path, self.run_name)
+        self.profiled_set = lhapdf.getPDFSet(self.run_name)
+        self.profiled_members = self.profiled_set.mkPDFs()
+
+    def report(self):
+        """Print a before/after uncertainty comparison for all measurements."""
+        if self.profiled_set is None:
+            raise RuntimeError("No profiled set available; call run() first.")
+        report_pdf_comparison(
+            self.pdf_set, self.pdf_members,
+            self.profiled_set, self.profiled_members,
+            self.measurements, self
+        )
+
 def main():
     args = parse_arguments()
     measurements = parse_measurements(args)

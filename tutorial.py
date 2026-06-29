@@ -14,70 +14,48 @@ import lhapdf
 # Add e_profiler directory to python search path
 sys.path.append("/home/daniel/ePump/ePump_for_LatticePDF")
 
-# Import all core functions from e_profiler
+# Import the EProfiler class and any low-level functions used in later cells
 import e_profiler
 from e_profiler import (
-    setup_lhapdf_path,
+    EProfiler,
     parse_flavor_expression,
     evaluate_pdf_combination,
     compute_integrated_moment,
-    generate_in_file,
-    generate_data_file,
-    generate_theory_file,
-    run_epump,
-    report_pdf_comparison
+    run_closure_test,
+    detect_pdf_error_type,
 )
-
-print("--- Step 1: Environment Setup ---")
-setup_lhapdf_path()
-print("LHAPDF Search Paths:", lhapdf.paths())
 
 # ==========================================
 # CELL 2: Loading the Starting PDF Set
 # ==========================================
 print("\n--- Step 2: Loading Starting PDF Set ---")
-pdf_set_name = "CT18NNLO"
-pdf_set = lhapdf.getPDFSet(pdf_set_name)
-pdf_members = pdf_set.mkPDFs()
-print(f"Loaded '{pdf_set_name}' with {len(pdf_members)} members successfully.")
+# EProfiler calls setup_lhapdf_path() and lhapdf.getPDFSet() + mkPDFs() internally,
+# so the PDF set is ready as soon as the object is created.
+profiler = EProfiler("CT18NNLO", "tutorial_demo")
+print(f"Loaded '{profiler.pdf_set_name}' with {len(profiler.pdf_members)} members successfully.")
 
 # ==========================================
 # CELL 3: MC-to-Hessian Detection and Conversion
 # ==========================================
 print("\n--- Step 3: MC-to-Hessian Detection and Conversion ---")
-from e_profiler import detect_pdf_error_type, convert_mc_to_hessian
-import tempfile
 
 # Check the current set (CT18NNLO is already Hessian)
-error_type = detect_pdf_error_type(pdf_set_name)
-print(f"ErrorType for '{pdf_set_name}': {error_type}")
+error_type = detect_pdf_error_type(profiler.pdf_set_name)
+print(f"ErrorType for '{profiler.pdf_set_name}': {error_type}")
 
-# Now demonstrate conversion with an MC replica set
+# Demonstrate conversion with an MC replica set
 mc_pdf_name = "NNPDF23_lo_as_0130_qed"
 mc_error_type = detect_pdf_error_type(mc_pdf_name)
 print(f"ErrorType for '{mc_pdf_name}': {mc_error_type}")
 
-mc2h_output_dir = tempfile.mkdtemp(prefix='epump_mc2h_')
-converted_name, converted_path = convert_mc_to_hessian(
-    pdf_name=mc_pdf_name,
-    neig=50,
-    Q=1.0,
-    epsilon=1000.0,
-    output_dir=mc2h_output_dir,
-    max_nf=3
-)
-print(f"Converted set: '{converted_name}' at {converted_path}")
-
-setup_lhapdf_path(custom_path=mc2h_output_dir)
-hess_set = lhapdf.getPDFSet(converted_name)
-hess_members = hess_set.mkPDFs()
-print(f"Loaded converted set with {len(hess_members)} members (expected {2*50+1}=101)")
+mc_profiler = EProfiler(mc_pdf_name, "tutorial_mc_demo")
+mc_profiler.convert_to_hessian(neig=50, Q=1.0, epsilon=1000.0, max_nf=3)
+print(f"Converted set: '{mc_profiler.pdf_set_name}' with {len(mc_profiler.pdf_members)} members (expected {2*50+1}=101)")
 
 # ==========================================
 # CELL 4: MC-to-Hessian Closure Test
 # ==========================================
 print("\n--- Step 4: Closure Test ---")
-from e_profiler import run_closure_test
 
 xmin, xmax, nx = 0.1, 0.7, 100
 measurements_for_test = [{
@@ -88,20 +66,8 @@ measurements_for_test = [{
     'weight': '1', 'moment': 0
 }]
 
-class DummyArgs:
-    obs_type = 'moment'
-    xmin = xmin
-    xmax = xmax
-    nx = nx
-    Q2 = 4.0
-    flavor = 'u-d'
-    weight = '1'
-    moment = 0
-
-run_closure_test(mc_pdf_name, converted_name, measurements_for_test, DummyArgs())
-
-import shutil
-shutil.rmtree(mc2h_output_dir, ignore_errors=True)
+# run_closure_test accepts args but never reads from it, so None is safe
+run_closure_test(mc_pdf_name, mc_profiler.pdf_set_name, measurements_for_test, None)
 
 # ==========================================
 # CELL 5: Parsing Flavor Expressions & Point Evaluation
@@ -115,7 +81,7 @@ print(f"Parsed Terms for '{expression}':", parsed_terms) # Expected: [(1.0, 2), 
 # Evaluate the flavor expression for the central member (member 0) at x=0.5, Q^2=4.0
 x_val = 0.5
 Q2_val = 4.0
-val_point = evaluate_pdf_combination(pdf_members[0], parsed_terms, x_val, Q2_val)
+val_point = evaluate_pdf_combination(profiler.pdf_members[0], parsed_terms, x_val, Q2_val)
 print(f"Value at x={x_val}, Q2={Q2_val}: {val_point:.6f}")
 
 # ==========================================
@@ -125,7 +91,7 @@ print("\n--- Step 6: Integrated Moments & Specific Weight Functions ---")
 
 # Compute integrated moment with default weight ('1') and moment n=0
 val_moment_0 = compute_integrated_moment(
-    pdf_member=pdf_members[0],
+    pdf_member=profiler.pdf_members[0],
     parsed_terms=parsed_terms,
     xmin=xmin,
     xmax=xmax,
@@ -138,7 +104,7 @@ print(f"Integrated Moment (weight='1', n=0) on [{xmin}, {xmax}]: {val_moment_0:.
 
 # Compute integrated moment with default weight ('1') and moment n=1
 val_moment_1 = compute_integrated_moment(
-    pdf_member=pdf_members[0],
+    pdf_member=profiler.pdf_members[0],
     parsed_terms=parsed_terms,
     xmin=xmin,
     xmax=xmax,
@@ -151,7 +117,7 @@ print(f"Integrated Moment (weight='1', n=1) on [{xmin}, {xmax}]: {val_moment_1:.
 
 # Compute integrated moment with Gaussian weight and moment n=1
 val_gaussian = compute_integrated_moment(
-    pdf_member=pdf_members[0],
+    pdf_member=profiler.pdf_members[0],
     parsed_terms=parsed_terms,
     xmin=xmin,
     xmax=xmax,
@@ -163,88 +129,38 @@ val_gaussian = compute_integrated_moment(
 print(f"Integrated Moment (weight='gaussian', n=1) on [{xmin}, {xmax}]: {val_gaussian:.6f}")
 
 # ==========================================
-# CELL 7: Defining and Parsing Measurements
+# CELL 7: Defining and Adding Measurements
 # ==========================================
-print("\n--- Step 7: Defining and Parsing Measurements ---")
-# Define pseudodata measurements in dict format compatible with the generators.
-# Format: [x, Q2, value, statistical_error, uncor_sys, cor_sys...]
-raw_measurement = [0.5, 2.0, 0.151, 0.040, 0.0]
-
-measurements = [{
-    'x': raw_measurement[0],
-    'Q2': raw_measurement[1],
-    'value': raw_measurement[2],
-    'stat': raw_measurement[3],
-    'uncor_sys': raw_measurement[4],
-    'cor_sys': [],
-    'obs_type': 'moment',
-    'flavor': 'u-d',
-    'xmin': xmin,
-    'xmax': xmax,
-    'nx': nx,
-    'weight': '1',
-    'moment': 0
-}]
-print("Measurement Configuration:", measurements[0])
+print("\n--- Step 7: Defining and Adding Measurements ---")
+# add_measurement() builds the dict format expected by all downstream generators.
+profiler.add_measurement(
+    x=0.5, Q2=2.0, value=0.151, stat=0.040,
+    obs_type='moment', flavor='u-d',
+    xmin=xmin, xmax=xmax, nx=nx, weight='1', moment=0
+)
+print("Measurement Configuration:", profiler.measurements[0])
 
 # ==========================================
 # CELL 8: Dynamic File Generation
 # ==========================================
 print("\n--- Step 8: Dynamic ePump File Generation ---")
-run_name = "tutorial_demo"
-
-in_file = f"{run_name}.in"
-data_file = f"{run_name}.data"
-theory_file = f"{run_name}.theory"
-
-n_ev_pairs = (len(pdf_members) - 1) // 2
-n_obs = len(measurements)
-
-print(f"Generating control file: {in_file}")
-generate_in_file(in_file, run_name, n_ev_pairs, n_obs, pdf_set_name)
-
-print(f"Generating data file: {data_file}")
-generate_data_file(data_file, measurements)
-
-print(f"Generating theory file: {theory_file}")
-# Create dummy namespace class to emulate parsed arguments for theory generator
-class DummyArgs:
-    obs_type = 'moment'
-    xmin = xmin
-    xmax = xmax
-    nx = nx
-    Q2 = 2.0
-    flavor = 'u-d'
-    weight = '1'
-    moment = 0
-
-generate_theory_file(theory_file, pdf_members, measurements, DummyArgs())
+# generate_files() writes the .in, .data, and .theory files in one call.
+# No DummyArgs needed — the profiler holds all configuration.
+profiler.generate_files()
 print("All files generated successfully.")
 
 # ==========================================
 # CELL 9: Running ePump Profiling
 # ==========================================
 print("\n--- Step 9: Executing ePump Profiling ---")
-# Path to compiled UpdatePDFs binary
-epump_bin_path = "/home/daniel/ePump/ePump_for_LatticePDF/ePump_kp20221218/src/UpdatePDFs"
-run_epump(epump_bin_path, run_name)
+# run() invokes the UpdatePDFs binary and loads the resulting profiled PDF set.
+profiler.run()
 
 # ==========================================
 # CELL 10: Loading Profiled PDFs & Reporting Comparison
 # ==========================================
 print("\n--- Step 10: PDF Uncertainty Comparison & Reporting ---")
-# Load profiled PDF set that was generated during step 7
-profiled_set = lhapdf.getPDFSet(run_name)
-profiled_members = profiled_set.mkPDFs()
+# report() compares original vs profiled uncertainties for every measurement.
+profiler.report()
 
-# Run full comparative report!
-report_pdf_comparison(
-    original_set=pdf_set,
-    original_members=pdf_members,
-    updated_set=profiled_set,
-    updated_members=profiled_members,
-    measurements=measurements,
-    args=DummyArgs()
-)
-
-print("\nTutorial run complete. Everything works flawlessly! :)")
+print("\nTutorial run complete.")
