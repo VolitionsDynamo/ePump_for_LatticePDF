@@ -812,14 +812,14 @@ class EProfiler:
         ep.report()
     """
 
-    def __init__(self, pdf_set_name, run_name, epump_path=None):
+    def __init__(self, pdf_set_name, run_name, epump_path=None, lhapdf_path=None):
         self.pdf_set_name = pdf_set_name
         self.run_name = run_name
         self.epump_path = os.path.abspath(epump_path or _DEFAULT_EPUMP_PATH)
         self.measurements = []
         self.profiled_set = None
         self.profiled_members = None
-        setup_lhapdf_path()
+        setup_lhapdf_path(lhapdf_path)
         self.pdf_set = lhapdf.getPDFSet(pdf_set_name)
         self.pdf_members = self.pdf_set.mkPDFs()
 
