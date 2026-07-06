@@ -308,10 +308,18 @@ def generate_in_file(filepath, base_name, n_ev_pairs, n_obs, pdf_name):
     """
     Writes the .in control file for ePump.
     """
-    ensure_pdf_symlink(pdf_name)
-    pdf_in_path = f"./{pdf_name}/{pdf_name}"
     leaf_name = os.path.basename(base_name) or base_name
-    pdf_out_path = f"./{base_name}/{leaf_name}"
+
+    # Use absolute path for PDFin so ePump can find it when run from a subdirectory.
+    pdf_abs_dir = find_pdf_dir(pdf_name)
+    if pdf_abs_dir:
+        pdf_in_path = f"{pdf_abs_dir}/{pdf_name}"
+    else:
+        ensure_pdf_symlink(pdf_name)
+        pdf_in_path = f"./{pdf_name}/{pdf_name}"
+
+    # PDFout is relative to the directory ePump runs from (the project subdir).
+    pdf_out_path = f"./{leaf_name}/{leaf_name}"
 
     parent = os.path.dirname(filepath)
     if parent:
@@ -321,7 +329,7 @@ def generate_in_file(filepath, base_name, n_ev_pairs, n_obs, pdf_name):
         f.write("+++ N(EV pairs)                       N(Data Sets)   PDFtype(C/L/N)    DiagonalQuad(Y/N)    Dyn_Tol?(Y/N)  Tol_squared \n")
         f.write(f"        {n_ev_pairs:<38}{1:<17}L                  N                   N            1    \n")
         f.write("+++ ObservableFile                    N(Observables)  Data?(Y/N)      Error_type     Weight          \n")
-        f.write(f"        {base_name:<36}{n_obs:<16}Y                4           1\n")
+        f.write(f"        {leaf_name:<36}{n_obs:<16}Y                4           1\n")
         f.write("+++     PDFname                       PDFout   \n")
         f.write(f"     {pdf_in_path}    {pdf_out_path}\n")
         f.write("# Generated dynamically by e_profiler.py\n")
@@ -675,23 +683,29 @@ def run_epump(epump_path, base_name):
         print(f"Error: ePump binary not found at: {epump_path}", file=sys.stderr)
         print("Please compile ePump or specify the correct path using --epump-path", file=sys.stderr)
         sys.exit(1)
-        
-    print(f"Executing ePump profiling: {epump_path} {base_name} ...")
-    os.makedirs(base_name, exist_ok=True)
+
+    # Run ePump from the project subdirectory using only the leaf name, so that
+    # Fortran's free-format reader never sees a '/' in the base name field.
+    run_dir = os.path.dirname(os.path.abspath(base_name))
+    leaf_name = os.path.basename(base_name) or base_name
+
+    print(f"Executing ePump profiling: {epump_path} {leaf_name} (cwd={run_dir}) ...")
+    os.makedirs(os.path.join(run_dir, leaf_name), exist_ok=True)
     import subprocess
-    result = subprocess.run([epump_path, base_name], stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
-    
+    result = subprocess.run([epump_path, leaf_name], cwd=run_dir,
+                            stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+
     if result.returncode != 0:
         print(f"ePump execution failed with exit code {result.returncode}", file=sys.stderr)
         print(f"STDOUT:\n{result.stdout}", file=sys.stderr)
         print(f"STDERR:\n{result.stderr}", file=sys.stderr)
         sys.exit(1)
-        
-    out_file = f"{base_name}.out"
+
+    out_file = os.path.join(run_dir, f"{leaf_name}.out")
     if not os.path.exists(out_file):
         print(f"Error: ePump output file {out_file} was not created.", file=sys.stderr)
         sys.exit(1)
-        
+
     print(f"ePump executed successfully. Parsing results from {out_file}...")
     
     chi2_old = None
