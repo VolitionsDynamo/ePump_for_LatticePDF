@@ -310,8 +310,13 @@ def generate_in_file(filepath, base_name, n_ev_pairs, n_obs, pdf_name):
     """
     ensure_pdf_symlink(pdf_name)
     pdf_in_path = f"./{pdf_name}/{pdf_name}"
-    pdf_out_path = f"./{base_name}/{base_name}"
-    
+    leaf_name = os.path.basename(base_name) or base_name
+    pdf_out_path = f"./{base_name}/{leaf_name}"
+
+    parent = os.path.dirname(filepath)
+    if parent:
+        os.makedirs(parent, exist_ok=True)
+
     with open(filepath, "w") as f:
         f.write("+++ N(EV pairs)                       N(Data Sets)   PDFtype(C/L/N)    DiagonalQuad(Y/N)    Dyn_Tol?(Y/N)  Tol_squared \n")
         f.write(f"        {n_ev_pairs:<38}{1:<17}L                  N                   N            1    \n")
@@ -815,6 +820,7 @@ class EProfiler:
     def __init__(self, pdf_set_name, run_name, epump_path=None):
         self.pdf_set_name = pdf_set_name
         self.run_name = run_name
+        self.run_leaf = os.path.basename(run_name) or run_name
         self.epump_path = os.path.abspath(epump_path or _DEFAULT_EPUMP_PATH)
         self.measurements = []
         self.profiled_set = None
@@ -879,7 +885,9 @@ class EProfiler:
     def run(self):
         """Run the ePump binary and load the profiled PDF set."""
         run_epump(self.epump_path, self.run_name)
-        self.profiled_set = lhapdf.getPDFSet(self.run_name)
+        run_dir = os.path.dirname(os.path.abspath(self.run_name))
+        lhapdf.setPaths([run_dir] + lhapdf.paths())
+        self.profiled_set = lhapdf.getPDFSet(self.run_leaf)
         self.profiled_members = self.profiled_set.mkPDFs()
 
     def report(self):
@@ -988,7 +996,10 @@ def main():
     print("\n--- Milestone 5 Comparison and Reporting ---")
     print(f"Loading profiled PDF set '{args.name}'...")
     try:
-        updated_set = lhapdf.getPDFSet(args.name)
+        leaf_name = os.path.basename(args.name) or args.name
+        run_dir = os.path.dirname(os.path.abspath(args.name))
+        lhapdf.setPaths([run_dir] + lhapdf.paths())
+        updated_set = lhapdf.getPDFSet(leaf_name)
         updated_members = updated_set.mkPDFs()
         print(f"Successfully loaded profiled set '{args.name}' with {len(updated_members)} members.")
     except Exception as e:
