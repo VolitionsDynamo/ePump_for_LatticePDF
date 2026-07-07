@@ -310,12 +310,25 @@ def generate_in_file(filepath, base_name, n_ev_pairs, n_obs, pdf_name):
     """
     leaf_name = os.path.basename(base_name) or base_name
 
-    # Use absolute path for PDFin so ePump can find it when run from a subdirectory.
+    # run_dir is where ePump will execute from; all paths in the .in file must
+    # resolve relative to it. ePump stores PDFin in a char[80] buffer, so we
+    # must use a relative path — the absolute path often exceeds 80 chars.
+    run_dir = os.path.dirname(os.path.abspath(base_name)) or os.getcwd()
+
     pdf_abs_dir = find_pdf_dir(pdf_name)
     if pdf_abs_dir:
-        pdf_in_path = f"{pdf_abs_dir}/{pdf_name}"
+        rel_pdf_dir = os.path.relpath(pdf_abs_dir, run_dir)
+        pdf_in_path = f"{rel_pdf_dir}/{pdf_name}"
     else:
-        ensure_pdf_symlink(pdf_name)
+        # Fallback: create a symlink inside run_dir so ePump can find the set.
+        symlink_in_run_dir = os.path.join(run_dir, pdf_name)
+        if not os.path.exists(symlink_in_run_dir):
+            pdf_dir = find_pdf_dir(pdf_name)
+            if pdf_dir:
+                try:
+                    os.symlink(pdf_dir, symlink_in_run_dir)
+                except Exception as e:
+                    print(f"Warning: Failed to create symlink in run_dir: {e}", file=sys.stderr)
         pdf_in_path = f"./{pdf_name}/{pdf_name}"
 
     # PDFout is relative to the directory ePump runs from (the project subdir).
@@ -436,6 +449,9 @@ def generate_theory_file(filepath, pdf_members, measurements, args):
     taking into account per-measurement flavor combinations, types, bounds, and weight functions.
     Writes them to a .theory file.
     """
+    parent = os.path.dirname(filepath)
+    if parent:
+        os.makedirs(parent, exist_ok=True)
     n_members = len(pdf_members)
     n_obs = len(measurements)
     
@@ -476,6 +492,9 @@ def generate_data_file(filepath, measurements):
     """
     Writes measurements to a .data file in ePump format.
     """
+    parent = os.path.dirname(filepath)
+    if parent:
+        os.makedirs(parent, exist_ok=True)
     first_m = measurements[0]
     C = len(first_m['cor_sys'])
     
