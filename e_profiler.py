@@ -5,6 +5,7 @@ e_profiler.py - Standalone, robust CLI script to interface Python observable com
 
 import sys
 import os
+import glob
 import argparse
 import re
 import tempfile
@@ -20,20 +21,34 @@ MC2H_SRC = os.path.join(SCRIPT_DIR, 'mc2hessian', 'src')
 
 def setup_lhapdf_path(custom_path=None):
     """
-    Sets up the LHAPDF_DATA_PATH environment variable portably.
+    Sets up the LHAPDF_DATA_PATH environment variable and LHAPDF's runtime
+    path list so that PDF sets are findable immediately after this call.
     """
+    seen = set()
     paths = []
+
+    def _add(p):
+        p = os.path.abspath(p)
+        if p not in seen:
+            seen.add(p)
+            paths.append(p)
+
     if custom_path:
-        paths.append(os.path.abspath(custom_path))
-    paths.append(LATTICE_TEST_DIR)
-    paths.append(os.getcwd())
-    
-    # Append any pre-existing paths
-    env_path = os.environ.get('LHAPDF_DATA_PATH', '')
-    if env_path:
-        paths.append(env_path)
-        
+        _add(custom_path)
+    _add(LATTICE_TEST_DIR)
+    _add(os.getcwd())
+
+    # Preserve paths already known to LHAPDF at runtime (e.g. the system data dir)
+    for p in lhapdf.paths():
+        _add(p)
+
+    # Preserve paths from the environment variable
+    for p in os.environ.get('LHAPDF_DATA_PATH', '').split(':'):
+        if p:
+            _add(p)
+
     os.environ['LHAPDF_DATA_PATH'] = ':'.join(paths)
+    lhapdf.setPaths(paths)
 
 def find_pdf_dir(pdf_name):
     """
@@ -160,10 +175,48 @@ def expand_symm_to_asymm(set_dir, set_name, neig):
                 f.write(f"NumMembers: {2*neig + 1}\n")
             elif line.strip().startswith('ErrorType:'):
                 f.write("ErrorType: hessian\n")
+            elif line.strip().startswith('SetDesc:'):
+                # ePump strips the last character of SetDesc and appends "'",
+                # assuming the value is single-quoted.  Convert double-quoted
+                # values to single-quoted so the output .info remains valid YAML.
+                f.write(line.replace('SetDesc: "', "SetDesc: '", 1)
+                             .rstrip('\n').rstrip('"') + "'\n"
+                        if line.strip().startswith('SetDesc: "')
+                        else line)
             else:
                 f.write(line)
 
     print(f"  Expanded symmetric Hessian ({neig+1} members) to asymmetric pairs ({2*neig+1} members).")
+
+
+def _strip_dat_flavor_lines(dat_path):
+    """
+    Strip trailing whitespace from the flavor-ID line in each subgrid of an
+    LHAPDF6 .dat file.  ePump compares this line verbatim against the Flavors
+    string parsed from the .info file; a trailing space causes an infinite loop
+    that writes multi-GB output files.
+    """
+    with open(dat_path, 'r') as f:
+        lines = f.readlines()
+
+    changed = False
+    i = 0
+    while i < len(lines):
+        if lines[i].strip() == '---':
+            # x-knots at i+1, Q-knots at i+2, flavor IDs at i+3
+            flavor_idx = i + 3
+            if flavor_idx < len(lines):
+                stripped = lines[flavor_idx].rstrip() + '\n'
+                if stripped != lines[flavor_idx]:
+                    lines[flavor_idx] = stripped
+                    changed = True
+            i = flavor_idx + 1
+        else:
+            i += 1
+
+    if changed:
+        with open(dat_path, 'w') as f:
+            f.writelines(lines)
 
 
 def convert_mc_to_hessian(pdf_name, neig=50, Q=1.0, epsilon=1000.0,
@@ -209,6 +262,14 @@ def convert_mc_to_hessian(pdf_name, neig=50, Q=1.0, epsilon=1000.0,
     # Step 4: Expand symmetric -> asymmetric pairs for ePump
     set_dir = os.path.join(output_dir or '', set_name)
     expand_symm_to_asymm(set_dir, set_name, neig)
+
+    # Step 5: Strip trailing whitespace from flavor lines in every .dat file.
+    # ePump's UpdatePDFs_LHAPDF reads lines until inputstring == flavorstring
+    # (parsed from the .info file with commas removed). If the .dat flavor line
+    # has a trailing space, the comparison never matches, getline loops past EOF,
+    # and ePump writes the same line forever → multi-GB output files.
+    for dat_file in sorted(glob.glob(os.path.join(set_dir, '*.dat'))):
+        _strip_dat_flavor_lines(dat_file)
 
     return set_name, os.path.abspath(set_dir)
 
@@ -315,18 +376,25 @@ def generate_in_file(filepath, base_name, n_ev_pairs, n_obs, pdf_name):
     # must use a relative path — the absolute path often exceeds 80 chars.
     run_dir = os.path.dirname(os.path.abspath(base_name)) or os.getcwd()
 
+    _EPUMP_PATH_LIMIT = 80
+
     pdf_abs_dir = find_pdf_dir(pdf_name)
     if pdf_abs_dir:
         rel_pdf_dir = os.path.relpath(pdf_abs_dir, run_dir)
         pdf_in_path = f"{rel_pdf_dir}/{pdf_name}"
     else:
-        # Fallback: create a symlink inside run_dir so ePump can find the set.
+        pdf_in_path = None
+
+    # If the path exceeds ePump's char[80] buffer, fall back to a symlink
+    # inside run_dir so the path shrinks to ./<pdf_name>/<pdf_name>.
+    if pdf_in_path is None or len(pdf_in_path) >= _EPUMP_PATH_LIMIT:
         symlink_in_run_dir = os.path.join(run_dir, pdf_name)
         if not os.path.exists(symlink_in_run_dir):
-            pdf_dir = find_pdf_dir(pdf_name)
-            if pdf_dir:
+            src = pdf_abs_dir or find_pdf_dir(pdf_name)
+            if src:
                 try:
-                    os.symlink(pdf_dir, symlink_in_run_dir)
+                    os.makedirs(run_dir, exist_ok=True)
+                    os.symlink(src, symlink_in_run_dir)
                 except Exception as e:
                     print(f"Warning: Failed to create symlink in run_dir: {e}", file=sys.stderr)
         pdf_in_path = f"./{pdf_name}/{pdf_name}"
@@ -899,7 +967,7 @@ class EProfiler:
             self.pdf_set_name, neig=neig, Q=Q,
             epsilon=epsilon, output_dir=output_dir, max_nf=max_nf
         )
-        setup_lhapdf_path(custom_path=output_dir)
+        setup_lhapdf_path(custom_path=output_dir)  # updates both env var and lhapdf.paths()
         self.pdf_set_name = converted_name
         self.pdf_set = lhapdf.getPDFSet(converted_name)
         self.pdf_members = self.pdf_set.mkPDFs()
