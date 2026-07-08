@@ -43,13 +43,13 @@ print("\n--- Step 3: MC-to-Hessian Detection and Conversion ---")
 error_type = detect_pdf_error_type(profiler.pdf_set_name)
 print(f"ErrorType for '{profiler.pdf_set_name}': {error_type}")
 
-# Demonstrate conversion with an MC replica set
+# EProfiler auto-detects MC replica sets at construction and converts them.
+# No explicit convert_to_hessian() call is needed.
 mc_pdf_name = "NNPDF23_lo_as_0130_qed"
 mc_error_type = detect_pdf_error_type(mc_pdf_name)
 print(f"ErrorType for '{mc_pdf_name}': {mc_error_type}")
 
-mc_profiler = EProfiler(mc_pdf_name, "tutorial_mc_demo")
-mc_profiler.convert_to_hessian(neig=50, Q=1.0, epsilon=1000.0, max_nf=3)
+mc_profiler = EProfiler(mc_pdf_name, "tutorial_mc_demo")  # auto-converts
 print(f"Converted set: '{mc_profiler.pdf_set_name}' with {len(mc_profiler.pdf_members)} members (expected {2*50+1}=101)")
 
 # ==========================================

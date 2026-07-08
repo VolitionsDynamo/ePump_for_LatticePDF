@@ -904,12 +904,14 @@ class EProfiler:
     """High-level interface for the ePump PDF profiling pipeline.
 
     Loads the PDF set on construction so subsequent calls are self-contained.
-    For MC replica sets, call convert_to_hessian() before generate_files().
+    MC replica sets are automatically detected and converted to asymmetric Hessian
+    format during __init__; no explicit conversion step is required.
     All file I/O is relative to the working directory at the time of the call.
 
-    Typical usage (Hessian set)::
+    Typical usage::
 
-        ep = EProfiler("CT18NNLO", "my_run")
+        ep = EProfiler("CT18NNLO", "my_run")          # Hessian — loaded as-is
+        ep = EProfiler("NNPDF31_nnlo_as_0118", "r")   # MC replicas — auto-converted
         ep.add_measurement(x=0.5, Q2=4.0, value=0.151, stat=0.040,
                            obs_type='moment', flavor='u-d',
                            xmin=0.1, xmax=0.7, nx=100)
@@ -918,7 +920,9 @@ class EProfiler:
         ep.report()
     """
 
-    def __init__(self, pdf_set_name, run_name, epump_path=None, lhapdf_path=None):
+    def __init__(self, pdf_set_name, run_name, epump_path=None, lhapdf_path=None,
+                 mc2h_neig=50, mc2h_Q=1.0, mc2h_epsilon=1000.0,
+                 mc2h_output_dir=None, mc2h_max_nf=3):
         self.pdf_set_name = pdf_set_name
         self.run_name = run_name
         self.run_leaf = os.path.basename(run_name) or run_name
@@ -929,6 +933,14 @@ class EProfiler:
         setup_lhapdf_path(lhapdf_path)
         self.pdf_set = lhapdf.getPDFSet(pdf_set_name)
         self.pdf_members = self.pdf_set.mkPDFs()
+        error_type = detect_pdf_error_type(pdf_set_name)
+        if error_type in ('replicas', 'mc'):
+            print(f"[EProfiler] MC replica set detected ('{pdf_set_name}'); "
+                  f"converting to Hessian (neig={mc2h_neig}) ...")
+            self.convert_to_hessian(
+                neig=mc2h_neig, Q=mc2h_Q, epsilon=mc2h_epsilon,
+                output_dir=mc2h_output_dir, max_nf=mc2h_max_nf,
+            )
 
     def add_measurement(self, x, Q2, value, stat,
                         uncor_sys=0.0, cor_sys=None,
