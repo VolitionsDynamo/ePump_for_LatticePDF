@@ -8,7 +8,8 @@ cfg = {
     "flavor": "u-d",         # algebraic combination: "u-d", "u", "2*u-d", …
     "Q2":     4.0,           # scale Q² in GeV²
     "nx":     100,           # x integration points
-    "moment": 1,             # Gaussian shape parameter (1 = standard Gaussian)
+    "moment": 1,             # moment order n (x^n weighting inside the window)
+    "weight": "gaussian",   # weight function: "gaussian" → g_n, "1" → a_n (flat)
 
     # ── MC-to-Hessian (ignored if pdf is already Hessian) ─────────────────────
     "mc2h_neig":    50,
@@ -34,8 +35,7 @@ cfg = {
     ],
 
     # ── Output ────────────────────────────────────────────────────────────────
-    "output_dir":  "scan_results",
-    "output_plot": "scan_results/heatmap.pdf",
+    "output_dir":  "scan_results",   # heatmap.pdf is saved here automatically
     "epump_path":  "./ePump_kp20221218/src/UpdatePDFs",
     "lhapdf_path": None,     # optional extra LHAPDF data path
 
