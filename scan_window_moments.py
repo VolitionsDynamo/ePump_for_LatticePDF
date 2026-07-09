@@ -123,6 +123,7 @@ class WindowMomentScanner:
         Q2         = float(cfg['Q2'])
         nx         = int(cfg['nx'])
         moment     = int(cfg.get('moment', 1))
+        weight     = cfg.get('weight', 'gaussian')
         output_dir = os.path.abspath(cfg['output_dir'])
         epump_path = os.path.abspath(cfg.get('epump_path', './ePump_kp20221218/src/UpdatePDFs'))
         pdf_name   = self._pdf_name
@@ -154,7 +155,7 @@ class WindowMomentScanner:
 
             central_val = compute_integrated_moment(
                 base_central, parsed_terms, xmin, xmax, nx, Q2,
-                weight_type='gaussian', moment=moment,
+                weight_type=weight, moment=moment,
             )
             stat_err = rel_unc * abs(central_val)
 
@@ -177,13 +178,13 @@ class WindowMomentScanner:
                 x=x0, Q2=Q2, value=central_val, stat=stat_err,
                 obs_type='moment', flavor=flavor,
                 xmin=xmin, xmax=xmax, nx=nx,
-                weight='gaussian', moment=moment,
+                weight=weight, moment=moment,
             )
             ep.generate_files()
             ep.run()
             print(f"  Profiling complete ({idx}/{n_total})")
 
-            kwargs = dict(weight_type='gaussian', moment=moment)
+            kwargs = dict(weight_type=weight, moment=moment)
             n_orig = len(ep.pdf_members)
             orig_vals = []
             for k, m in enumerate(ep.pdf_members, 1):
@@ -214,6 +215,133 @@ class WindowMomentScanner:
         self.widths    = widths
         self.ratio     = ratio
         self.boundary  = boundary
+
+        results_path = os.path.join(output_dir, 'results.npz')
+        np.savez(results_path,
+                 midpoints=self.midpoints,
+                 widths=self.widths,
+                 ratio=self.ratio,
+                 boundary=self.boundary,
+                 pdf_name=np.array(self._pdf_name),
+                 mc2h_dir=np.array(self._mc2h_dir or ''))
+        print(f"Results saved → {results_path}")
+        return self
+
+    # ------------------------------------------------------------------
+    def load(self):
+        """Load ratio/boundary arrays from a previous run() call.  Enables plot()."""
+        results_path = os.path.join(os.path.abspath(self.cfg['output_dir']), 'results.npz')
+        if not os.path.exists(results_path):
+            raise FileNotFoundError(
+                f"No saved results at {results_path}. Run the scan first.")
+        data = np.load(results_path, allow_pickle=True)
+        self.midpoints = data['midpoints'].tolist()
+        self.widths    = data['widths'].tolist()
+        self.ratio     = data['ratio']
+        self.boundary  = data['boundary']
+        print(f"Results loaded ← {results_path}")
+        return self
+
+    # ------------------------------------------------------------------
+    def recompute(self):
+        """Recompute ratio from existing profiled PDFs on disk (no ePump re-run).
+
+        Useful when you want to evaluate a different flavor or Q2 without
+        re-running the full scan.  Requires a previous run() in the same output_dir.
+        """
+        output_dir   = os.path.abspath(self.cfg['output_dir'])
+        results_path = os.path.join(output_dir, 'results.npz')
+        if not os.path.exists(results_path):
+            raise FileNotFoundError(
+                f"No saved state at {results_path}. Run the scan first.")
+
+        # Restore pdf_name / mc2h_dir — avoids re-running MC→Hessian conversion
+        saved = np.load(results_path, allow_pickle=True)
+        self._pdf_name = str(saved['pdf_name'])
+        mc2h_str       = str(saved['mc2h_dir'])
+        self._mc2h_dir = mc2h_str if mc2h_str else None
+
+        setup_lhapdf_path(self.cfg.get('lhapdf_path'))
+        if self._mc2h_dir:
+            setup_lhapdf_path(custom_path=self._mc2h_dir)
+            lhapdf.setPaths([self._mc2h_dir] + lhapdf.paths())
+
+        cfg         = self.cfg
+        scan_points = cfg['scan_points']
+        flavor      = cfg['flavor']
+        Q2          = float(cfg['Q2'])
+        nx          = int(cfg['nx'])
+        moment      = int(cfg.get('moment', 1))
+        weight      = cfg.get('weight', 'gaussian')
+        pdf_name    = self._pdf_name
+
+        midpoints = sorted(set(float(p[0]) for p in scan_points))
+        widths    = sorted(set(float(p[1]) for p in scan_points))
+        mid_idx   = {v: i for i, v in enumerate(midpoints)}
+        wid_idx   = {v: j for j, v in enumerate(widths)}
+
+        ratio    = np.full((len(midpoints), len(widths)), np.nan)
+        boundary = np.zeros((len(midpoints), len(widths)), dtype=bool)
+
+        parsed_terms = parse_flavor_expression(flavor)
+        base_set     = lhapdf.getPDFSet(pdf_name)
+        base_members = base_set.mkPDFs()
+
+        n_total = len(scan_points)
+        for idx, row in enumerate(scan_points, 1):
+            x0, w = float(row[0]), float(row[1])
+            xmin = max(1e-4, x0 - w / 2)
+            xmax = min(0.999, x0 + w / 2)
+            boundary[mid_idx[x0], wid_idx[w]] = (x0 - w / 2 < 1e-4) or (x0 + w / 2 > 0.999)
+
+            label   = f"mid_{x0:.4f}_wid_{w:.4f}"
+            run_dir = os.path.join(output_dir, label)
+            print(f"\n({idx}/{n_total}) [{label}] — loading profiled set …")
+
+            if not os.path.isdir(os.path.join(run_dir, label)):
+                print(f"  WARNING: profiled set not found at {run_dir}/{label}/ — skipping.")
+                continue
+
+            if run_dir not in lhapdf.paths():
+                lhapdf.setPaths([run_dir] + lhapdf.paths())
+            profiled_set     = lhapdf.getPDFSet(label)
+            profiled_members = profiled_set.mkPDFs()
+
+            kwargs    = dict(weight_type=weight, moment=moment)
+            n_base    = len(base_members)
+            n_prof    = len(profiled_members)
+            orig_vals = []
+            for k, m in enumerate(base_members, 1):
+                print(f"  original  {k}/{n_base}", end='\r', flush=True)
+                orig_vals.append(compute_integrated_moment(
+                    m, parsed_terms, xmin, xmax, nx, Q2, **kwargs))
+            print()
+            prof_vals = []
+            for k, m in enumerate(profiled_members, 1):
+                print(f"  profiled  {k}/{n_prof}", end='\r', flush=True)
+                prof_vals.append(compute_integrated_moment(
+                    m, parsed_terms, xmin, xmax, nx, Q2, **kwargs))
+            print()
+
+            o = base_set.uncertainty(orig_vals)
+            p = profiled_set.uncertainty(prof_vals)
+            sigma_b = (o.errminus + o.errplus) / 2.0
+            sigma_a = (p.errminus + p.errplus) / 2.0
+            r = sigma_a / sigma_b if sigma_b > 0 else np.nan
+            ratio[mid_idx[x0], wid_idx[w]] = r
+            print(f"  σ_before={sigma_b:.5g}  σ_after={sigma_a:.5g}  ratio={r:.4f}")
+
+        self.midpoints = midpoints
+        self.widths    = widths
+        self.ratio     = ratio
+        self.boundary  = boundary
+
+        np.savez(results_path,
+                 midpoints=self.midpoints, widths=self.widths,
+                 ratio=self.ratio, boundary=self.boundary,
+                 pdf_name=np.array(self._pdf_name),
+                 mc2h_dir=np.array(self._mc2h_dir or ''))
+        print(f"Results saved → {results_path}")
         return self
 
     # ------------------------------------------------------------------
@@ -240,6 +368,10 @@ class WindowMomentScanner:
         M_e = _bin_edges(np.array(self.midpoints))
         W_e = _bin_edges(np.array(self.widths))
 
+        moment = int(cfg.get('moment', 1))
+        weight = cfg.get('weight', 'gaussian')
+        obs_label = rf'$g_{{{moment}}}$' if weight == 'gaussian' else rf'$a_{{{moment}}}$'
+
         fig, ax = plt.subplots(figsize=(9, 6))
         masked = np.ma.masked_invalid(self.ratio)
         cm = ax.pcolormesh(W_e, M_e, masked, cmap='plasma_r', vmin=0, vmax=1)
@@ -258,13 +390,12 @@ class WindowMomentScanner:
         ax.set_xlabel('Window width  $w$')
         ax.set_ylabel('Window midpoint  $x_0$')
         ax.set_title(
-            f"{cfg['pdf']}    {cfg['flavor']}    $Q^2 = {cfg['Q2']}$ GeV$^2$"
+            f"{cfg['pdf']}    {cfg['flavor']}    {obs_label}    $Q^2 = {cfg['Q2']}$ GeV$^2$"
         )
         plt.tight_layout()
 
         if save:
-            out = cfg['output_plot']
-            os.makedirs(os.path.dirname(os.path.abspath(out)), exist_ok=True)
+            out = os.path.join(os.path.abspath(cfg['output_dir']), 'heatmap.pdf')
             fig.savefig(out, dpi=150)
             print(f"Heat map → {out}")
 
@@ -277,11 +408,17 @@ def main():
     matplotlib.use('Agg')   # non-interactive backend for terminal use
 
     if len(sys.argv) < 2:
-        print(f"Usage: {sys.argv[0]} runcard.py", file=sys.stderr)
+        print(f"Usage: {sys.argv[0]} runcard.py [load|recompute]", file=sys.stderr)
         sys.exit(1)
 
     scanner = WindowMomentScanner(sys.argv[1])
-    scanner.run()
+    cmd = sys.argv[2] if len(sys.argv) >= 3 else 'run'
+    if cmd == 'load':
+        scanner.load()
+    elif cmd == 'recompute':
+        scanner.recompute()
+    else:
+        scanner.run()
     scanner.plot(save=True)
 
 
