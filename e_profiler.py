@@ -247,7 +247,8 @@ def convert_mc_to_hessian(pdf_name, neig=50, Q=1.0, epsilon=1000.0,
     l = get_limits(X.T)
     diff = (l.up1s - l.low1s) / 2
     std = np.std(X, axis=1)
-    mask = (np.abs((diff - std) / diff) < epsilon)
+    with np.errstate(invalid='ignore', divide='ignore'):
+        mask = (np.abs((diff - std) / diff) < epsilon)
     print(f"  Keeping {np.count_nonzero(mask)} / {len(mask)} points (epsilon = {epsilon})")
     X = X[mask, :]
 
@@ -386,18 +387,20 @@ def generate_in_file(filepath, base_name, n_ev_pairs, n_obs, pdf_name):
         pdf_in_path = None
 
     # If the path exceeds ePump's char[80] buffer, fall back to a symlink
-    # inside run_dir so the path shrinks to ./<pdf_name>/<pdf_name>.
+    # inside run_dir named 's' (one char) so the path shrinks to ./s/<pdf_name>.
+    # Using the set name as the symlink name (old approach) still produces a
+    # path of ./<name>/<name> which exceeds 80 chars when len(name) >= 38.
     if pdf_in_path is None or len(pdf_in_path) >= _EPUMP_PATH_LIMIT:
-        symlink_in_run_dir = os.path.join(run_dir, pdf_name)
-        if not os.path.exists(symlink_in_run_dir):
+        short_link = os.path.join(run_dir, 's')
+        if not os.path.exists(short_link):
             src = pdf_abs_dir or find_pdf_dir(pdf_name)
             if src:
                 try:
                     os.makedirs(run_dir, exist_ok=True)
-                    os.symlink(src, symlink_in_run_dir)
+                    os.symlink(src, short_link)
                 except Exception as e:
                     print(f"Warning: Failed to create symlink in run_dir: {e}", file=sys.stderr)
-        pdf_in_path = f"./{pdf_name}/{pdf_name}"
+        pdf_in_path = f"./s/{pdf_name}"
 
     # PDFout is relative to the directory ePump runs from (the project subdir).
     pdf_out_path = f"./{leaf_name}/{leaf_name}"
