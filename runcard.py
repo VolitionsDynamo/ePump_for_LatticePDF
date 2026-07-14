@@ -34,8 +34,12 @@ cfg = {
         [0.40,  0.15, 0.10],
     ],
 
+    # ── Full-moment integration (for run_moments / plot_moments) ─────────────
+    "moment_xmin":  1e-4,   # lower x bound for ∫ x^n f(x) dx  (n = 0,1,2,3)
+    "moment_xmax":  0.999,  # upper x bound
+
     # ── Output ────────────────────────────────────────────────────────────────
-    "output_dir":  "scan_results",   # heatmap.pdf is saved here automatically
+    "output_dir":  "scan_results",   # heatmap.pdf / heatmap_moments_runcard.pdf saved here
     "epump_path":  "./ePump_kp20221218/src/UpdatePDFs",
     "lhapdf_path": None,     # optional extra LHAPDF data path
 
