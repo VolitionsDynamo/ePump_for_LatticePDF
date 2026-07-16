@@ -66,10 +66,7 @@ class WindowMomentScanner:
 
     def __init__(self, cfg):
         if isinstance(cfg, (str, os.PathLike)):
-            self._runcard_name = os.path.splitext(os.path.basename(str(cfg)))[0]
             cfg = load_runcard(str(cfg))
-        else:
-            self._runcard_name = None
         self.cfg = cfg
 
         # Results — populated by run()
@@ -526,7 +523,7 @@ class WindowMomentScanner:
         plt.tight_layout()
 
         if save:
-            suffix = f"_{self._runcard_name}" if self._runcard_name else ""
+            suffix = '_' + os.path.basename(os.path.abspath(cfg['output_dir']))
             out = os.path.join(os.path.abspath(cfg['output_dir']), f"heatmap{suffix}.pdf")
             fig.savefig(out, dpi=150)
             print(f"Heat map → {out}")
@@ -593,18 +590,16 @@ class WindowMomentScanner:
             fontsize=13,
         )
 
-        # Single shared colorbar on the right
-        cbar = fig.colorbar(
+        fig.subplots_adjust(top=0.92, right=0.87, hspace=0.38, wspace=0.30)
+        cax = fig.add_axes([0.90, 0.12, 0.02, 0.74])
+        fig.colorbar(
             matplotlib.cm.ScalarMappable(norm=norm, cmap='plasma_r'),
-            ax=axes_flat,
+            cax=cax,
             label=r'$\sigma_\mathrm{after}\ /\ \sigma_\mathrm{before}$  (full moment)',
-            shrink=0.8,
         )
 
-        plt.tight_layout()
-
         if save:
-            suffix = f"_{self._runcard_name}" if self._runcard_name else ""
+            suffix = '_' + os.path.basename(os.path.abspath(cfg['output_dir']))
             out = os.path.join(
                 os.path.abspath(cfg['output_dir']),
                 f"heatmap_moments{suffix}.pdf",
