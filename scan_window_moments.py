@@ -70,13 +70,23 @@ class WindowMomentScanner:
         self.cfg = cfg
 
         # Results — populated by run()
-        self.midpoints = None
-        self.widths    = None
-        self.ratio     = None
-        self.boundary  = None
+        self.midpoints       = None
+        self.widths          = None
+        self.ratio           = None
+        self.boundary        = None
+        self.sigma_before_ww = None  # shape (n_mid, n_wid)
+        self.central_ww      = None  # shape (n_mid, n_wid)
 
         # Window-to-moment results — populated by run_moments()
-        self.ratio_moments = None  # shape (4, n_mid, n_wid)
+        self.ratio_moments        = None  # shape (4, n_mid, n_wid)
+        self.sigma_before_moments = None  # shape (4,)
+        self.central_moments      = None  # shape (4,)
+
+        # Tensor-charge results — populated by run_charges()
+        self.ratio_charges        = None  # shape (n_obs, n_mid, n_wid)
+        self.sigma_before_charges = None  # shape (n_obs,)
+        self.central_charges      = None  # shape (n_obs,)
+        self.charge_labels        = None  # list of label strings
 
         # Internal state — populated by setup()
         self._pdf_name = None
@@ -138,8 +148,10 @@ class WindowMomentScanner:
         mid_idx   = {v: i for i, v in enumerate(midpoints)}
         wid_idx   = {v: j for j, v in enumerate(widths)}
 
-        ratio    = np.full((len(midpoints), len(widths)), np.nan)
-        boundary = np.zeros((len(midpoints), len(widths)), dtype=bool)
+        ratio           = np.full((len(midpoints), len(widths)), np.nan)
+        boundary        = np.zeros((len(midpoints), len(widths)), dtype=bool)
+        sigma_before_ww = np.full((len(midpoints), len(widths)), np.nan)
+        central_ww      = np.full((len(midpoints), len(widths)), np.nan)
 
         parsed_terms = parse_flavor_expression(flavor)
 
@@ -212,13 +224,17 @@ class WindowMomentScanner:
             sigma_b = (o.errminus + o.errplus) / 2.0
             sigma_a = (p.errminus + p.errplus) / 2.0
             r = sigma_a / sigma_b if sigma_b > 0 else np.nan
-            ratio[mid_idx[x0], wid_idx[w]] = r
+            ratio[mid_idx[x0], wid_idx[w]]           = r
+            sigma_before_ww[mid_idx[x0], wid_idx[w]] = sigma_b
+            central_ww[mid_idx[x0], wid_idx[w]]      = central_val
             print(f"  σ_before={sigma_b:.5g}  σ_after={sigma_a:.5g}  ratio={r:.4f}")
 
-        self.midpoints = midpoints
-        self.widths    = widths
-        self.ratio     = ratio
-        self.boundary  = boundary
+        self.midpoints       = midpoints
+        self.widths          = widths
+        self.ratio           = ratio
+        self.boundary        = boundary
+        self.sigma_before_ww = sigma_before_ww
+        self.central_ww      = central_ww
 
         results_path = os.path.join(output_dir, 'results.npz')
         np.savez(results_path,
@@ -226,6 +242,8 @@ class WindowMomentScanner:
                  widths=self.widths,
                  ratio=self.ratio,
                  boundary=self.boundary,
+                 sigma_before_ww=sigma_before_ww,
+                 central_ww=central_ww,
                  pdf_name=np.array(self._pdf_name),
                  mc2h_dir=np.array(self._mc2h_dir or ''))
         print(f"Results saved → {results_path}")
@@ -239,10 +257,12 @@ class WindowMomentScanner:
             raise FileNotFoundError(
                 f"No saved results at {results_path}. Run the scan first.")
         data = np.load(results_path, allow_pickle=True)
-        self.midpoints = data['midpoints'].tolist()
-        self.widths    = data['widths'].tolist()
-        self.ratio     = data['ratio']
-        self.boundary  = data['boundary']
+        self.midpoints       = data['midpoints'].tolist()
+        self.widths          = data['widths'].tolist()
+        self.ratio           = data['ratio']
+        self.boundary        = data['boundary']
+        self.sigma_before_ww = data['sigma_before_ww'] if 'sigma_before_ww' in data else None
+        self.central_ww      = data['central_ww']      if 'central_ww'      in data else None
         print(f"Results loaded ← {results_path}")
         return self
 
@@ -395,7 +415,21 @@ class WindowMomentScanner:
 
         parsed_terms = parse_flavor_expression(flavor)
         base_set     = lhapdf.getPDFSet(pdf_name)
+        base_central = base_set.mkPDF(0)
         base_members = base_set.mkPDFs()
+
+        # Compute base-PDF relative uncertainty for each n-moment once (constant across scan)
+        sigma_before_moments = np.zeros(n_orders)
+        central_moments_arr  = np.zeros(n_orders)
+        for ni, n in enumerate(range(n_orders)):
+            kwargs_base = dict(weight_type='1', moment=n)
+            base_vals = [compute_integrated_moment(
+                             m, parsed_terms, moment_xmin, moment_xmax, nx, Q2, **kwargs_base)
+                         for m in base_members]
+            o_base = base_set.uncertainty(base_vals)
+            sigma_before_moments[ni] = (o_base.errminus + o_base.errplus) / 2.0
+            central_moments_arr[ni]  = compute_integrated_moment(
+                base_central, parsed_terms, moment_xmin, moment_xmax, nx, Q2, **kwargs_base)
 
         n_total = len(scan_points)
         for idx, row in enumerate(scan_points, 1):
@@ -442,14 +476,18 @@ class WindowMomentScanner:
                 ratio_moments[ni, mid_idx[x0], wid_idx[w]] = r
                 print(f"  n={n}: σ_before={sigma_b:.5g}  σ_after={sigma_a:.5g}  ratio={r:.4f}")
 
-        self.midpoints     = midpoints
-        self.widths        = widths
-        self.boundary      = boundary
-        self.ratio_moments = ratio_moments
+        self.midpoints            = midpoints
+        self.widths               = widths
+        self.boundary             = boundary
+        self.ratio_moments        = ratio_moments
+        self.sigma_before_moments = sigma_before_moments
+        self.central_moments      = central_moments_arr
 
         moments_path = os.path.join(output_dir, 'results_moments.npz')
         np.savez(moments_path,
                  ratio_moments=ratio_moments,
+                 sigma_before_moments=sigma_before_moments,
+                 central_moments=central_moments_arr,
                  midpoints=np.array(midpoints),
                  widths=np.array(widths),
                  boundary=boundary,
@@ -466,10 +504,12 @@ class WindowMomentScanner:
             raise FileNotFoundError(
                 f"No saved moment results at {moments_path}. Run run_moments() first.")
         data = np.load(moments_path, allow_pickle=True)
-        self.ratio_moments = data['ratio_moments']
-        self.midpoints     = data['midpoints'].tolist()
-        self.widths        = data['widths'].tolist()
-        self.boundary      = data['boundary']
+        self.ratio_moments        = data['ratio_moments']
+        self.midpoints            = data['midpoints'].tolist()
+        self.widths               = data['widths'].tolist()
+        self.boundary             = data['boundary']
+        self.sigma_before_moments = data['sigma_before_moments'] if 'sigma_before_moments' in data else None
+        self.central_moments      = data['central_moments']      if 'central_moments'      in data else None
         print(f"Moment results loaded ← {moments_path}")
         return self
 
@@ -514,6 +554,15 @@ class WindowMomentScanner:
                         W_e[j + 1] - W_e[j], M_e[i + 1] - M_e[i],
                         fill=False, hatch='///', edgecolor='white', linewidth=0.5,
                     ))
+                if (self.sigma_before_ww is not None and
+                        self.central_ww is not None and
+                        np.isfinite(self.sigma_before_ww[i, j]) and
+                        abs(self.central_ww[i, j]) > 0):
+                    pct = 100 * self.sigma_before_ww[i, j] / abs(self.central_ww[i, j])
+                    cx = (W_e[j] + W_e[j + 1]) / 2
+                    cy = (M_e[i] + M_e[i + 1]) / 2
+                    ax.text(cx, cy, f"{pct:.0f}%",
+                            ha='center', va='center', fontsize=7, color='white')
 
         ax.set_xlabel('Window width  $w$')
         ax.set_ylabel('Window midpoint  $x_0$')
@@ -582,7 +631,13 @@ class WindowMomentScanner:
 
             ax.set_xlabel('Window width  $w$')
             ax.set_ylabel('Window midpoint  $x_0$')
-            ax.set_title(rf'$n = {ni}$')
+            if (self.sigma_before_moments is not None and
+                    self.central_moments is not None and
+                    abs(self.central_moments[ni]) > 0):
+                pct = 100 * self.sigma_before_moments[ni] / abs(self.central_moments[ni])
+                ax.set_title(rf'$n = {ni}$   ($\sigma/\mu = {pct:.1f}\%$)')
+            else:
+                ax.set_title(rf'$n = {ni}$')
 
         fig.suptitle(
             f"{cfg['pdf']}    {cfg['flavor']}    window: {obs_label}"
@@ -606,6 +661,241 @@ class WindowMomentScanner:
             )
             fig.savefig(out, dpi=150)
             print(f"Moment heat map → {out}")
+
+        return fig
+
+
+    # ------------------------------------------------------------------
+    def run_charges(self):
+        """Compute tensor-charge ratios from existing profiled PDFs (no ePump re-run).
+
+        For each scan point (x0, w), loads the profiled PDF set produced by run(),
+        then evaluates each observable in cfg['charge_observables'] over
+        [charge_xmin, charge_xmax] for both base and profiled PDFs.  Stores
+        ratio_charges of shape (n_obs, n_midpoints, n_widths).
+
+        Saves results_charges.npz in output_dir.  Call plot_charges() afterwards.
+        """
+        output_dir   = os.path.abspath(self.cfg['output_dir'])
+        results_path = os.path.join(output_dir, 'results.npz')
+        if not os.path.exists(results_path):
+            raise FileNotFoundError(
+                f"No saved state at {results_path}. Run the scan first.")
+
+        saved = np.load(results_path, allow_pickle=True)
+        self._pdf_name = str(saved['pdf_name'])
+        mc2h_str       = str(saved['mc2h_dir'])
+        self._mc2h_dir = mc2h_str if mc2h_str else None
+
+        setup_lhapdf_path(self.cfg.get('lhapdf_path'))
+        if self._mc2h_dir:
+            setup_lhapdf_path(custom_path=self._mc2h_dir)
+            lhapdf.setPaths([self._mc2h_dir] + lhapdf.paths())
+
+        cfg                = self.cfg
+        scan_points        = cfg['scan_points']
+        Q2                 = float(cfg['Q2'])
+        nx                 = int(cfg['nx'])
+        charge_xmin        = float(cfg.get('charge_xmin', cfg.get('moment_xmin', 1e-4)))
+        charge_xmax        = float(cfg.get('charge_xmax', cfg.get('moment_xmax', 0.999)))
+        charge_observables = cfg.get('charge_observables', [])
+        pdf_name           = self._pdf_name
+
+        if not charge_observables:
+            raise ValueError("cfg['charge_observables'] is empty or missing.")
+
+        midpoints = sorted(set(float(p[0]) for p in scan_points))
+        widths    = sorted(set(float(p[1]) for p in scan_points))
+        mid_idx   = {v: i for i, v in enumerate(midpoints)}
+        wid_idx   = {v: j for j, v in enumerate(widths)}
+
+        n_obs                = len(charge_observables)
+        ratio_charges        = np.full((n_obs, len(midpoints), len(widths)), np.nan)
+        sigma_before_charges = np.zeros(n_obs)
+        central_charges      = np.zeros(n_obs)
+        boundary             = np.zeros((len(midpoints), len(widths)), dtype=bool)
+
+        base_set     = lhapdf.getPDFSet(pdf_name)
+        base_central = base_set.mkPDF(0)
+        base_members = base_set.mkPDFs()
+
+        # Pre-compute base-PDF uncertainty for each charge observable
+        parsed_charge_terms = []
+        for obs_idx, obs in enumerate(charge_observables):
+            parsed = parse_flavor_expression(obs['flavor'])
+            parsed_charge_terms.append(parsed)
+            kwargs = dict(weight_type='1', moment=obs.get('moment', 0))
+            base_vals = [compute_integrated_moment(
+                             m, parsed, charge_xmin, charge_xmax, nx, Q2, **kwargs)
+                         for m in base_members]
+            o = base_set.uncertainty(base_vals)
+            sigma_before_charges[obs_idx] = (o.errminus + o.errplus) / 2.0
+            central_charges[obs_idx]      = compute_integrated_moment(
+                base_central, parsed, charge_xmin, charge_xmax, nx, Q2, **kwargs)
+
+        n_total = len(scan_points)
+        for idx, row in enumerate(scan_points, 1):
+            x0, w = float(row[0]), float(row[1])
+            boundary[mid_idx[x0], wid_idx[w]] = (x0 - w / 2 < 1e-4) or (x0 + w / 2 > 0.999)
+
+            label   = f"mid_{x0:.4f}_wid_{w:.4f}"
+            run_dir = os.path.join(output_dir, label)
+            print(f"\n({idx}/{n_total}) [{label}] — loading profiled set …")
+
+            if not os.path.isdir(os.path.join(run_dir, label)):
+                print(f"  WARNING: profiled set not found at {run_dir}/{label}/ — skipping.")
+                continue
+
+            if run_dir not in lhapdf.paths():
+                lhapdf.setPaths([run_dir] + lhapdf.paths())
+            profiled_set     = lhapdf.getPDFSet(label)
+            profiled_members = profiled_set.mkPDFs()
+            n_prof           = len(profiled_members)
+
+            for obs_idx, obs in enumerate(charge_observables):
+                parsed = parsed_charge_terms[obs_idx]
+                kwargs = dict(weight_type='1', moment=obs.get('moment', 0))
+                prof_vals = []
+                for k, m in enumerate(profiled_members, 1):
+                    print(f"  obs={obs_idx}  profiled  {k}/{n_prof}", end='\r', flush=True)
+                    prof_vals.append(compute_integrated_moment(
+                        m, parsed, charge_xmin, charge_xmax, nx, Q2, **kwargs))
+                print()
+                p = profiled_set.uncertainty(prof_vals)
+                sigma_a = (p.errminus + p.errplus) / 2.0
+                r = sigma_a / sigma_before_charges[obs_idx] if sigma_before_charges[obs_idx] > 0 else np.nan
+                ratio_charges[obs_idx, mid_idx[x0], wid_idx[w]] = r
+                print(f"  {obs.get('label', obs['flavor'])}: σ_after={sigma_a:.5g}  ratio={r:.4f}")
+
+        self.midpoints            = midpoints
+        self.widths               = widths
+        self.boundary             = boundary
+        self.ratio_charges        = ratio_charges
+        self.sigma_before_charges = sigma_before_charges
+        self.central_charges      = central_charges
+        self.charge_labels        = [obs.get('label', obs['flavor']) for obs in charge_observables]
+
+        charges_path = os.path.join(output_dir, 'results_charges.npz')
+        np.savez(charges_path,
+                 ratio_charges=ratio_charges,
+                 sigma_before_charges=sigma_before_charges,
+                 central_charges=central_charges,
+                 charge_labels=np.array(self.charge_labels),
+                 midpoints=np.array(midpoints),
+                 widths=np.array(widths),
+                 boundary=boundary,
+                 pdf_name=np.array(self._pdf_name),
+                 mc2h_dir=np.array(self._mc2h_dir or ''))
+        print(f"Charge results saved → {charges_path}")
+        return self
+
+    # ------------------------------------------------------------------
+    def load_charges(self):
+        """Load tensor-charge results from a previous run_charges() call."""
+        charges_path = os.path.join(os.path.abspath(self.cfg['output_dir']), 'results_charges.npz')
+        if not os.path.exists(charges_path):
+            raise FileNotFoundError(
+                f"No saved charge results at {charges_path}. Run run_charges() first.")
+        data = np.load(charges_path, allow_pickle=True)
+        self.ratio_charges        = data['ratio_charges']
+        self.sigma_before_charges = data['sigma_before_charges']
+        self.central_charges      = data['central_charges']
+        self.charge_labels        = data['charge_labels'].tolist()
+        self.midpoints            = data['midpoints'].tolist()
+        self.widths               = data['widths'].tolist()
+        self.boundary             = data['boundary']
+        print(f"Charge results loaded ← {charges_path}")
+        return self
+
+    # ------------------------------------------------------------------
+    def plot_charges(self, save=True):
+        """
+        Generate a 2×2 grid of window-to-charge heat maps.
+
+        Each panel shows σ_after / σ_before for one tensor-charge observable
+        defined in cfg['charge_observables'], with the before-profiling relative
+        uncertainty displayed in the subplot title.
+
+        Parameters
+        ----------
+        save : bool
+            Write figure to output_dir/heatmap_charges_{basename}.pdf (default True).
+
+        Returns
+        -------
+        matplotlib.figure.Figure
+        """
+        if self.ratio_charges is None:
+            raise RuntimeError("Call run_charges() or load_charges() before plot_charges().")
+
+        import matplotlib.pyplot as plt
+
+        cfg = self.cfg
+        M_e = _bin_edges(np.array(self.midpoints))
+        W_e = _bin_edges(np.array(self.widths))
+
+        moment = int(cfg.get('moment', 1))
+        weight = cfg.get('weight', 'gaussian')
+        obs_label = rf'$g_{{{moment}}}$' if weight == 'gaussian' else rf'$a_{{{moment}}}$'
+
+        n_obs     = self.ratio_charges.shape[0]
+        fig, axes = plt.subplots(2, 2, figsize=(14, 10))
+        axes_flat = axes.flatten()
+
+        vmin, vmax = 0.0, 1.0
+        norm = matplotlib.colors.Normalize(vmin=vmin, vmax=vmax)
+
+        for obs_idx in range(min(n_obs, 4)):
+            ax = axes_flat[obs_idx]
+            masked = np.ma.masked_invalid(self.ratio_charges[obs_idx])
+            ax.pcolormesh(W_e, M_e, masked, cmap='plasma_r', norm=norm)
+
+            for i in range(len(self.midpoints)):
+                for j in range(len(self.widths)):
+                    if self.boundary[i, j]:
+                        ax.add_patch(matplotlib.patches.Rectangle(
+                            (W_e[j], M_e[i]),
+                            W_e[j + 1] - W_e[j], M_e[i + 1] - M_e[i],
+                            fill=False, hatch='///', edgecolor='white', linewidth=0.5,
+                        ))
+
+            ax.set_xlabel('Window width  $w$')
+            ax.set_ylabel('Window midpoint  $x_0$')
+
+            lbl = self.charge_labels[obs_idx] if self.charge_labels else f"obs {obs_idx}"
+            if (self.sigma_before_charges is not None and
+                    self.central_charges is not None and
+                    abs(self.central_charges[obs_idx]) > 0):
+                pct = 100 * self.sigma_before_charges[obs_idx] / abs(self.central_charges[obs_idx])
+                ax.set_title(rf"{lbl}   ($\sigma/\mu = {pct:.1f}\%$)")
+            else:
+                ax.set_title(lbl)
+
+        for obs_idx in range(n_obs, 4):
+            axes_flat[obs_idx].set_visible(False)
+
+        fig.suptitle(
+            f"{cfg['pdf']}    window: {obs_label}"
+            f"    $Q^2 = {cfg['Q2']}$ GeV$^2$",
+            fontsize=13,
+        )
+
+        fig.subplots_adjust(top=0.92, right=0.87, hspace=0.38, wspace=0.30)
+        cax = fig.add_axes([0.90, 0.12, 0.02, 0.74])
+        fig.colorbar(
+            matplotlib.cm.ScalarMappable(norm=norm, cmap='plasma_r'),
+            cax=cax,
+            label=r'$\sigma_\mathrm{after}\ /\ \sigma_\mathrm{before}$  (tensor charge)',
+        )
+
+        if save:
+            suffix = '_' + os.path.basename(os.path.abspath(cfg['output_dir']))
+            out = os.path.join(
+                os.path.abspath(cfg['output_dir']),
+                f"heatmap_charges{suffix}.pdf",
+            )
+            fig.savefig(out, dpi=150)
+            print(f"Charge heat map → {out}")
 
         return fig
 
@@ -637,6 +927,12 @@ def main():
     elif cmd == 'load_moments':
         scanner.load_moments()
         scanner.plot_moments(save=True)
+    elif cmd == 'charges':
+        scanner.run_charges()
+        scanner.plot_charges(save=True)
+    elif cmd == 'load_charges':
+        scanner.load_charges()
+        scanner.plot_charges(save=True)
     else:
         scanner.run()
         scanner.plot(save=True)
