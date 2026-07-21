@@ -126,22 +126,30 @@ class WindowMomentScanner:
         return self
 
     # ------------------------------------------------------------------
-    def run(self):
-        """Run the full 2D scan. Calls setup() automatically if not already done."""
+    def run(self, force=False):
+        """Run the full 2D scan. Calls setup() automatically if not already done.
+
+        Parameters
+        ----------
+        force : bool
+            If True, ignore any previously saved results and rerun ePump for
+            every cell from scratch.  If False (default), resume from partial
+            results saved by an earlier run().
+        """
         if self._pdf_name is None:
             self.setup()
 
-        cfg        = self.cfg
+        cfg         = self.cfg
         scan_points = cfg['scan_points']
-        flavor     = cfg['flavor']
-        Q2         = float(cfg['Q2'])
-        nx         = int(cfg['nx'])
-        moment     = int(cfg.get('moment', 1))
-        weight     = cfg.get('weight', 'gaussian')
-        output_dir = os.path.abspath(cfg['output_dir'])
-        epump_path = os.path.abspath(cfg.get('epump_path', './ePump_kp20221218/src/UpdatePDFs'))
-        pdf_name   = self._pdf_name
-        mc2h_dir   = self._mc2h_dir
+        flavor      = cfg['flavor']
+        Q2          = float(cfg['Q2'])
+        nx          = int(cfg['nx'])
+        moment      = int(cfg.get('moment', 1))
+        weight      = cfg.get('weight', 'gaussian')
+        output_dir  = os.path.abspath(cfg['output_dir'])
+        epump_path  = os.path.abspath(cfg.get('epump_path', './ePump_kp20221218/src/UpdatePDFs'))
+        pdf_name    = self._pdf_name
+        mc2h_dir    = self._mc2h_dir
 
         midpoints = sorted(set(float(p[0]) for p in scan_points))
         widths    = sorted(set(float(p[1]) for p in scan_points))
@@ -153,6 +161,21 @@ class WindowMomentScanner:
         sigma_before_ww = np.full((len(midpoints), len(widths)), np.nan)
         central_ww      = np.full((len(midpoints), len(widths)), np.nan)
 
+        results_path = os.path.join(output_dir, 'results.npz')
+        if not force and os.path.exists(results_path):
+            saved = np.load(results_path, allow_pickle=True)
+            if (np.array_equal(saved['midpoints'], midpoints) and
+                    np.array_equal(saved['widths'], widths)):
+                ratio[...]    = saved['ratio']
+                boundary[...] = saved['boundary']
+                if 'sigma_before_ww' in saved:
+                    sigma_before_ww[...] = saved['sigma_before_ww']
+                if 'central_ww' in saved:
+                    central_ww[...]      = saved['central_ww']
+                n_done = int(np.sum(np.isfinite(ratio)))
+                if n_done:
+                    print(f"Resuming: {n_done}/{ratio.size} cells already done.")
+
         parsed_terms = parse_flavor_expression(flavor)
 
         # Load base set once; reused for all grid points
@@ -163,11 +186,16 @@ class WindowMomentScanner:
         n_total = len(scan_points)
         for idx, row in enumerate(scan_points, 1):
             x0, w, rel_unc = float(row[0]), float(row[1]), float(row[2])
-            xmin = max(1e-4, x0 - w / 2)
-            xmax = min(0.999, x0 + w / 2)
+            i, j = mid_idx[x0], wid_idx[w]
 
+            if np.isfinite(ratio[i, j]):
+                print(f"({idx}/{n_total}) [mid_{x0:.4f}_wid_{w:.4f}]  ← already done")
+                continue
+
+            xmin    = max(1e-4, x0 - w / 2)
+            xmax    = min(0.999, x0 + w / 2)
             clipped = (x0 - w / 2 < 1e-4) or (x0 + w / 2 > 0.999)
-            boundary[mid_idx[x0], wid_idx[w]] = clipped
+            boundary[i, j] = clipped
 
             central_val = compute_integrated_moment(
                 base_central, parsed_terms, xmin, xmax, nx, Q2,
@@ -177,57 +205,59 @@ class WindowMomentScanner:
 
             label    = f"mid_{x0:.4f}_wid_{w:.4f}"
             run_name = os.path.join(output_dir, label, label)
-
-            clip_tag = " [BOUNDARY-CLIPPED]" if clipped else ""
-            print(f"\n({idx}/{n_total}) [{label}]  x=[{xmin:.4f}, {xmax:.4f}]"
-                  f"  central={central_val:.6g}  stat={stat_err:.6g}{clip_tag}")
+            run_dir  = os.path.join(output_dir, label)
 
             if mc2h_dir and mc2h_dir not in lhapdf.paths():
                 lhapdf.setPaths([mc2h_dir] + lhapdf.paths())
 
-            ep = EProfiler(pdf_name, run_name, epump_path=epump_path,
-                           lhapdf_path=mc2h_dir)
-            ep.pdf_set     = base_set
-            ep.pdf_members = base_members
+            already_profiled = os.path.isdir(os.path.join(run_dir, label))
+            if already_profiled:
+                if run_dir not in lhapdf.paths():
+                    lhapdf.setPaths([run_dir] + lhapdf.paths())
+                profiled_set = lhapdf.getPDFSet(label)
+            else:
+                ep = EProfiler(pdf_name, run_name, epump_path=epump_path,
+                               lhapdf_path=mc2h_dir)
+                ep.pdf_set     = base_set
+                ep.pdf_members = base_members
+                ep.add_measurement(
+                    x=x0, Q2=Q2, value=central_val, stat=stat_err,
+                    obs_type='moment', flavor=flavor,
+                    xmin=xmin, xmax=xmax, nx=nx,
+                    weight=weight, moment=moment,
+                )
+                ep.generate_files()
+                ep.run()
+                profiled_set = ep.profiled_set
 
-            ep.add_measurement(
-                x=x0, Q2=Q2, value=central_val, stat=stat_err,
-                obs_type='moment', flavor=flavor,
-                xmin=xmin, xmax=xmax, nx=nx,
-                weight=weight, moment=moment,
-            )
-            ep.generate_files()
-            ep.run()
-            print(f"  Profiling complete ({idx}/{n_total})")
+            kwargs    = dict(weight_type=weight, moment=moment)
+            orig_vals = [compute_integrated_moment(
+                             m, parsed_terms, xmin, xmax, nx, Q2, **kwargs)
+                         for m in base_members]
+            lhapdf.setVerbosity(0)
+            prof_vals = [compute_integrated_moment(
+                             profiled_set.mkPDF(k), parsed_terms, xmin, xmax, nx, Q2, **kwargs)
+                         for k in range(profiled_set.size)]
+            lhapdf.setVerbosity(1)
 
-            kwargs = dict(weight_type=weight, moment=moment)
-            n_orig = len(ep.pdf_members)
-            orig_vals = []
-            for k, m in enumerate(ep.pdf_members, 1):
-                print(f"  original  {k}/{n_orig}", end='\r', flush=True)
-                orig_vals.append(compute_integrated_moment(
-                    m, parsed_terms, xmin, xmax, nx, Q2, **kwargs))
-            print()
-            orig_vals = np.array(orig_vals)
-
-            n_prof = len(ep.profiled_members)
-            prof_vals = []
-            for k, m in enumerate(ep.profiled_members, 1):
-                print(f"  profiled  {k}/{n_prof}", end='\r', flush=True)
-                prof_vals.append(compute_integrated_moment(
-                    m, parsed_terms, xmin, xmax, nx, Q2, **kwargs))
-            print()
-            prof_vals = np.array(prof_vals)
-
-            o = ep.pdf_set.uncertainty(orig_vals.tolist())
-            p = ep.profiled_set.uncertainty(prof_vals.tolist())
+            o = base_set.uncertainty(orig_vals)
+            p = profiled_set.uncertainty(prof_vals)
             sigma_b = (o.errminus + o.errplus) / 2.0
             sigma_a = (p.errminus + p.errplus) / 2.0
             r = sigma_a / sigma_b if sigma_b > 0 else np.nan
-            ratio[mid_idx[x0], wid_idx[w]]           = r
-            sigma_before_ww[mid_idx[x0], wid_idx[w]] = sigma_b
-            central_ww[mid_idx[x0], wid_idx[w]]      = central_val
-            print(f"  σ_before={sigma_b:.5g}  σ_after={sigma_a:.5g}  ratio={r:.4f}")
+            ratio[i, j]           = r
+            sigma_before_ww[i, j] = sigma_b
+            central_ww[i, j]      = central_val
+
+            clip_tag = "  [BOUNDARY-CLIPPED]" if clipped else ""
+            print(f"({idx}/{n_total}) [{label}]  → ratio={r:.4f}  "
+                  f"σ_before={sigma_b:.5g}  σ_after={sigma_a:.5g}{clip_tag}")
+            np.savez(results_path,
+                     midpoints=midpoints, widths=widths,
+                     ratio=ratio, boundary=boundary,
+                     sigma_before_ww=sigma_before_ww, central_ww=central_ww,
+                     pdf_name=np.array(self._pdf_name),
+                     mc2h_dir=np.array(self._mc2h_dir or ''))
 
         self.midpoints       = midpoints
         self.widths          = widths
@@ -235,17 +265,6 @@ class WindowMomentScanner:
         self.boundary        = boundary
         self.sigma_before_ww = sigma_before_ww
         self.central_ww      = central_ww
-
-        results_path = os.path.join(output_dir, 'results.npz')
-        np.savez(results_path,
-                 midpoints=self.midpoints,
-                 widths=self.widths,
-                 ratio=self.ratio,
-                 boundary=self.boundary,
-                 sigma_before_ww=sigma_before_ww,
-                 central_ww=central_ww,
-                 pdf_name=np.array(self._pdf_name),
-                 mc2h_dir=np.array(self._mc2h_dir or ''))
         print(f"Results saved → {results_path}")
         return self
 
@@ -320,32 +339,24 @@ class WindowMomentScanner:
 
             label   = f"mid_{x0:.4f}_wid_{w:.4f}"
             run_dir = os.path.join(output_dir, label)
-            print(f"\n({idx}/{n_total}) [{label}] — loading profiled set …")
 
             if not os.path.isdir(os.path.join(run_dir, label)):
-                print(f"  WARNING: profiled set not found at {run_dir}/{label}/ — skipping.")
+                print(f"({idx}/{n_total}) [{label}]  WARNING: profiled set not found — skipping.")
                 continue
 
             if run_dir not in lhapdf.paths():
                 lhapdf.setPaths([run_dir] + lhapdf.paths())
-            profiled_set     = lhapdf.getPDFSet(label)
-            profiled_members = profiled_set.mkPDFs()
+            profiled_set = lhapdf.getPDFSet(label)
 
             kwargs    = dict(weight_type=weight, moment=moment)
-            n_base    = len(base_members)
-            n_prof    = len(profiled_members)
-            orig_vals = []
-            for k, m in enumerate(base_members, 1):
-                print(f"  original  {k}/{n_base}", end='\r', flush=True)
-                orig_vals.append(compute_integrated_moment(
-                    m, parsed_terms, xmin, xmax, nx, Q2, **kwargs))
-            print()
-            prof_vals = []
-            for k, m in enumerate(profiled_members, 1):
-                print(f"  profiled  {k}/{n_prof}", end='\r', flush=True)
-                prof_vals.append(compute_integrated_moment(
-                    m, parsed_terms, xmin, xmax, nx, Q2, **kwargs))
-            print()
+            orig_vals = [compute_integrated_moment(
+                             m, parsed_terms, xmin, xmax, nx, Q2, **kwargs)
+                         for m in base_members]
+            lhapdf.setVerbosity(0)
+            prof_vals = [compute_integrated_moment(
+                             profiled_set.mkPDF(k), parsed_terms, xmin, xmax, nx, Q2, **kwargs)
+                         for k in range(profiled_set.size)]
+            lhapdf.setVerbosity(1)
 
             o = base_set.uncertainty(orig_vals)
             p = profiled_set.uncertainty(prof_vals)
@@ -353,7 +364,7 @@ class WindowMomentScanner:
             sigma_a = (p.errminus + p.errplus) / 2.0
             r = sigma_a / sigma_b if sigma_b > 0 else np.nan
             ratio[mid_idx[x0], wid_idx[w]] = r
-            print(f"  σ_before={sigma_b:.5g}  σ_after={sigma_a:.5g}  ratio={r:.4f}")
+            print(f"({idx}/{n_total}) [{label}]  → ratio={r:.4f}  σ_before={sigma_b:.5g}  σ_after={sigma_a:.5g}")
 
         self.midpoints = midpoints
         self.widths    = widths
@@ -369,7 +380,7 @@ class WindowMomentScanner:
         return self
 
     # ------------------------------------------------------------------
-    def run_moments(self):
+    def run_moments(self, force=False):
         """Compute window-to-moment ratios from existing profiled PDFs (no ePump re-run).
 
         For each scan point (x0, w), loads the profiled PDF set produced by run(),
@@ -377,7 +388,11 @@ class WindowMomentScanner:
         over [moment_xmin, moment_xmax] for both base and profiled PDFs.  Stores
         ratio_moments of shape (4, n_midpoints, n_widths).
 
-        Saves results_moments.npz in output_dir.  Call plot_moments() afterwards.
+        Parameters
+        ----------
+        force : bool
+            If True, recompute all cells from scratch.  If False (default),
+            resume from partial results saved by an earlier run_moments().
         """
         output_dir   = os.path.abspath(self.cfg['output_dir'])
         results_path = os.path.join(output_dir, 'results.npz')
@@ -409,9 +424,19 @@ class WindowMomentScanner:
         mid_idx   = {v: i for i, v in enumerate(midpoints)}
         wid_idx   = {v: j for j, v in enumerate(widths)}
 
-        n_orders     = 4
+        n_orders      = 4
         ratio_moments = np.full((n_orders, len(midpoints), len(widths)), np.nan)
         boundary      = np.zeros((len(midpoints), len(widths)), dtype=bool)
+
+        moments_path = os.path.join(output_dir, 'results_moments.npz')
+        if not force and os.path.exists(moments_path):
+            saved_m = np.load(moments_path, allow_pickle=True)
+            if (np.array_equal(saved_m['midpoints'], midpoints) and
+                    np.array_equal(saved_m['widths'], widths)):
+                ratio_moments[...] = saved_m['ratio_moments']
+                n_done = int(np.sum(np.all(np.isfinite(ratio_moments), axis=0)))
+                if n_done:
+                    print(f"Resuming moments: {n_done}/{len(midpoints)*len(widths)} cells already done.")
 
         parsed_terms = parse_flavor_expression(flavor)
         base_set     = lhapdf.getPDFSet(pdf_name)
@@ -421,8 +446,8 @@ class WindowMomentScanner:
         # Compute base-PDF relative uncertainty for each n-moment once (constant across scan)
         sigma_before_moments = np.zeros(n_orders)
         central_moments_arr  = np.zeros(n_orders)
-        for ni, n in enumerate(range(n_orders)):
-            kwargs_base = dict(weight_type='1', moment=n)
+        for ni in range(n_orders):
+            kwargs_base = dict(weight_type='1', moment=ni)
             base_vals = [compute_integrated_moment(
                              m, parsed_terms, moment_xmin, moment_xmax, nx, Q2, **kwargs_base)
                          for m in base_members]
@@ -434,47 +459,55 @@ class WindowMomentScanner:
         n_total = len(scan_points)
         for idx, row in enumerate(scan_points, 1):
             x0, w = float(row[0]), float(row[1])
-            boundary[mid_idx[x0], wid_idx[w]] = (x0 - w / 2 < 1e-4) or (x0 + w / 2 > 0.999)
+            i, j  = mid_idx[x0], wid_idx[w]
+
+            if np.all(np.isfinite(ratio_moments[:, i, j])):
+                print(f"({idx}/{n_total}) [mid_{x0:.4f}_wid_{w:.4f}]  ← already done")
+                continue
+
+            boundary[i, j] = (x0 - w / 2 < 1e-4) or (x0 + w / 2 > 0.999)
 
             label   = f"mid_{x0:.4f}_wid_{w:.4f}"
             run_dir = os.path.join(output_dir, label)
-            print(f"\n({idx}/{n_total}) [{label}] — loading profiled set …")
 
             if not os.path.isdir(os.path.join(run_dir, label)):
-                print(f"  WARNING: profiled set not found at {run_dir}/{label}/ — skipping.")
+                print(f"({idx}/{n_total}) [{label}]  WARNING: profiled set not found — skipping.")
                 continue
 
             if run_dir not in lhapdf.paths():
                 lhapdf.setPaths([run_dir] + lhapdf.paths())
-            profiled_set     = lhapdf.getPDFSet(label)
-            profiled_members = profiled_set.mkPDFs()
+            profiled_set = lhapdf.getPDFSet(label)
 
-            n_base = len(base_members)
-            n_prof = len(profiled_members)
-
-            for ni, n in enumerate(range(n_orders)):
-                kwargs = dict(weight_type='1', moment=n)
-
-                orig_vals = []
-                for k, m in enumerate(base_members, 1):
-                    print(f"  n={n}  original  {k}/{n_base}", end='\r', flush=True)
-                    orig_vals.append(compute_integrated_moment(
-                        m, parsed_terms, moment_xmin, moment_xmax, nx, Q2, **kwargs))
-                print()
-                prof_vals = []
-                for k, m in enumerate(profiled_members, 1):
-                    print(f"  n={n}  profiled  {k}/{n_prof}", end='\r', flush=True)
-                    prof_vals.append(compute_integrated_moment(
-                        m, parsed_terms, moment_xmin, moment_xmax, nx, Q2, **kwargs))
-                print()
-
+            ratio_strs = []
+            lhapdf.setVerbosity(0)
+            for ni in range(n_orders):
+                kwargs    = dict(weight_type='1', moment=ni)
+                orig_vals = [compute_integrated_moment(
+                                 m, parsed_terms, moment_xmin, moment_xmax, nx, Q2, **kwargs)
+                             for m in base_members]
+                prof_vals = [compute_integrated_moment(
+                                 profiled_set.mkPDF(k), parsed_terms,
+                                 moment_xmin, moment_xmax, nx, Q2, **kwargs)
+                             for k in range(profiled_set.size)]
                 o = base_set.uncertainty(orig_vals)
                 p = profiled_set.uncertainty(prof_vals)
                 sigma_b = (o.errminus + o.errplus) / 2.0
                 sigma_a = (p.errminus + p.errplus) / 2.0
                 r = sigma_a / sigma_b if sigma_b > 0 else np.nan
-                ratio_moments[ni, mid_idx[x0], wid_idx[w]] = r
-                print(f"  n={n}: σ_before={sigma_b:.5g}  σ_after={sigma_a:.5g}  ratio={r:.4f}")
+                ratio_moments[ni, i, j] = r
+                ratio_strs.append(f"n={ni}:{r:.3f}")
+            lhapdf.setVerbosity(1)
+
+            print(f"({idx}/{n_total}) [{label}]  → " + "  ".join(ratio_strs))
+            np.savez(moments_path,
+                     ratio_moments=ratio_moments,
+                     sigma_before_moments=sigma_before_moments,
+                     central_moments=central_moments_arr,
+                     midpoints=np.array(midpoints),
+                     widths=np.array(widths),
+                     boundary=boundary,
+                     pdf_name=np.array(self._pdf_name),
+                     mc2h_dir=np.array(self._mc2h_dir or ''))
 
         self.midpoints            = midpoints
         self.widths               = widths
@@ -482,17 +515,6 @@ class WindowMomentScanner:
         self.ratio_moments        = ratio_moments
         self.sigma_before_moments = sigma_before_moments
         self.central_moments      = central_moments_arr
-
-        moments_path = os.path.join(output_dir, 'results_moments.npz')
-        np.savez(moments_path,
-                 ratio_moments=ratio_moments,
-                 sigma_before_moments=sigma_before_moments,
-                 central_moments=central_moments_arr,
-                 midpoints=np.array(midpoints),
-                 widths=np.array(widths),
-                 boundary=boundary,
-                 pdf_name=np.array(self._pdf_name),
-                 mc2h_dir=np.array(self._mc2h_dir or ''))
         print(f"Moment results saved → {moments_path}")
         return self
 
@@ -666,7 +688,7 @@ class WindowMomentScanner:
 
 
     # ------------------------------------------------------------------
-    def run_charges(self):
+    def run_charges(self, force=False):
         """Compute tensor-charge ratios from existing profiled PDFs (no ePump re-run).
 
         For each scan point (x0, w), loads the profiled PDF set produced by run(),
@@ -674,7 +696,11 @@ class WindowMomentScanner:
         [charge_xmin, charge_xmax] for both base and profiled PDFs.  Stores
         ratio_charges of shape (n_obs, n_midpoints, n_widths).
 
-        Saves results_charges.npz in output_dir.  Call plot_charges() afterwards.
+        Parameters
+        ----------
+        force : bool
+            If True, recompute all cells from scratch.  If False (default),
+            resume from partial results saved by an earlier run_charges().
         """
         output_dir   = os.path.abspath(self.cfg['output_dir'])
         results_path = os.path.join(output_dir, 'results.npz')
@@ -715,6 +741,17 @@ class WindowMomentScanner:
         central_charges      = np.zeros(n_obs)
         boundary             = np.zeros((len(midpoints), len(widths)), dtype=bool)
 
+        charges_path = os.path.join(output_dir, 'results_charges.npz')
+        if not force and os.path.exists(charges_path):
+            saved_c = np.load(charges_path, allow_pickle=True)
+            if (np.array_equal(saved_c['midpoints'], midpoints) and
+                    np.array_equal(saved_c['widths'], widths) and
+                    saved_c['ratio_charges'].shape[0] == n_obs):
+                ratio_charges[...] = saved_c['ratio_charges']
+                n_done = int(np.sum(np.all(np.isfinite(ratio_charges), axis=0)))
+                if n_done:
+                    print(f"Resuming charges: {n_done}/{len(midpoints)*len(widths)} cells already done.")
+
         base_set     = lhapdf.getPDFSet(pdf_name)
         base_central = base_set.mkPDF(0)
         base_members = base_set.mkPDFs()
@@ -736,36 +773,53 @@ class WindowMomentScanner:
         n_total = len(scan_points)
         for idx, row in enumerate(scan_points, 1):
             x0, w = float(row[0]), float(row[1])
-            boundary[mid_idx[x0], wid_idx[w]] = (x0 - w / 2 < 1e-4) or (x0 + w / 2 > 0.999)
+            i, j  = mid_idx[x0], wid_idx[w]
+
+            if np.all(np.isfinite(ratio_charges[:, i, j])):
+                print(f"({idx}/{n_total}) [mid_{x0:.4f}_wid_{w:.4f}]  ← already done")
+                continue
+
+            boundary[i, j] = (x0 - w / 2 < 1e-4) or (x0 + w / 2 > 0.999)
 
             label   = f"mid_{x0:.4f}_wid_{w:.4f}"
             run_dir = os.path.join(output_dir, label)
-            print(f"\n({idx}/{n_total}) [{label}] — loading profiled set …")
 
             if not os.path.isdir(os.path.join(run_dir, label)):
-                print(f"  WARNING: profiled set not found at {run_dir}/{label}/ — skipping.")
+                print(f"({idx}/{n_total}) [{label}]  WARNING: profiled set not found — skipping.")
                 continue
 
             if run_dir not in lhapdf.paths():
                 lhapdf.setPaths([run_dir] + lhapdf.paths())
-            profiled_set     = lhapdf.getPDFSet(label)
-            profiled_members = profiled_set.mkPDFs()
-            n_prof           = len(profiled_members)
+            profiled_set = lhapdf.getPDFSet(label)
 
+            ratio_strs = []
+            lhapdf.setVerbosity(0)
             for obs_idx, obs in enumerate(charge_observables):
                 parsed = parsed_charge_terms[obs_idx]
                 kwargs = dict(weight_type='1', moment=obs.get('moment', 0))
-                prof_vals = []
-                for k, m in enumerate(profiled_members, 1):
-                    print(f"  obs={obs_idx}  profiled  {k}/{n_prof}", end='\r', flush=True)
-                    prof_vals.append(compute_integrated_moment(
-                        m, parsed, charge_xmin, charge_xmax, nx, Q2, **kwargs))
-                print()
+                prof_vals = [compute_integrated_moment(
+                                 profiled_set.mkPDF(k), parsed,
+                                 charge_xmin, charge_xmax, nx, Q2, **kwargs)
+                             for k in range(profiled_set.size)]
                 p = profiled_set.uncertainty(prof_vals)
                 sigma_a = (p.errminus + p.errplus) / 2.0
                 r = sigma_a / sigma_before_charges[obs_idx] if sigma_before_charges[obs_idx] > 0 else np.nan
-                ratio_charges[obs_idx, mid_idx[x0], wid_idx[w]] = r
-                print(f"  {obs.get('label', obs['flavor'])}: σ_after={sigma_a:.5g}  ratio={r:.4f}")
+                ratio_charges[obs_idx, i, j] = r
+                ratio_strs.append(f"obs{obs_idx}:{r:.3f}")
+            lhapdf.setVerbosity(1)
+
+            print(f"({idx}/{n_total}) [{label}]  → " + "  ".join(ratio_strs))
+            np.savez(charges_path,
+                     ratio_charges=ratio_charges,
+                     sigma_before_charges=sigma_before_charges,
+                     central_charges=central_charges,
+                     charge_labels=np.array([obs.get('label', obs['flavor'])
+                                             for obs in charge_observables]),
+                     midpoints=np.array(midpoints),
+                     widths=np.array(widths),
+                     boundary=boundary,
+                     pdf_name=np.array(self._pdf_name),
+                     mc2h_dir=np.array(self._mc2h_dir or ''))
 
         self.midpoints            = midpoints
         self.widths               = widths
@@ -774,18 +828,6 @@ class WindowMomentScanner:
         self.sigma_before_charges = sigma_before_charges
         self.central_charges      = central_charges
         self.charge_labels        = [obs.get('label', obs['flavor']) for obs in charge_observables]
-
-        charges_path = os.path.join(output_dir, 'results_charges.npz')
-        np.savez(charges_path,
-                 ratio_charges=ratio_charges,
-                 sigma_before_charges=sigma_before_charges,
-                 central_charges=central_charges,
-                 charge_labels=np.array(self.charge_labels),
-                 midpoints=np.array(midpoints),
-                 widths=np.array(widths),
-                 boundary=boundary,
-                 pdf_name=np.array(self._pdf_name),
-                 mc2h_dir=np.array(self._mc2h_dir or ''))
         print(f"Charge results saved → {charges_path}")
         return self
 
@@ -907,7 +949,7 @@ def main():
 
     if len(sys.argv) < 2:
         print(
-            f"Usage: {sys.argv[0]} runcard.py [run|load|recompute|moments|load_moments]",
+            f"Usage: {sys.argv[0]} runcard.py [run|recompute|moments|charges]",
             file=sys.stderr,
         )
         sys.exit(1)
@@ -915,23 +957,14 @@ def main():
     scanner = WindowMomentScanner(sys.argv[1])
     cmd = sys.argv[2] if len(sys.argv) >= 3 else 'run'
 
-    if cmd == 'load':
-        scanner.load()
-        scanner.plot(save=True)
-    elif cmd == 'recompute':
+    if cmd == 'recompute':
         scanner.recompute()
         scanner.plot(save=True)
     elif cmd == 'moments':
         scanner.run_moments()
         scanner.plot_moments(save=True)
-    elif cmd == 'load_moments':
-        scanner.load_moments()
-        scanner.plot_moments(save=True)
     elif cmd == 'charges':
         scanner.run_charges()
-        scanner.plot_charges(save=True)
-    elif cmd == 'load_charges':
-        scanner.load_charges()
         scanner.plot_charges(save=True)
     else:
         scanner.run()
