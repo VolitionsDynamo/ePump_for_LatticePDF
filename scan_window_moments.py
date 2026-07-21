@@ -426,7 +426,7 @@ class WindowMomentScanner:
 
         n_orders      = 4
         ratio_moments = np.full((n_orders, len(midpoints), len(widths)), np.nan)
-        boundary      = np.zeros((len(midpoints), len(widths)), dtype=bool)
+        boundary      = saved['boundary'].copy()
 
         moments_path = os.path.join(output_dir, 'results_moments.npz')
         if not force and os.path.exists(moments_path):
@@ -464,8 +464,6 @@ class WindowMomentScanner:
             if np.all(np.isfinite(ratio_moments[:, i, j])):
                 print(f"({idx}/{n_total}) [mid_{x0:.4f}_wid_{w:.4f}]  ← already done")
                 continue
-
-            boundary[i, j] = (x0 - w / 2 < 1e-4) or (x0 + w / 2 > 0.999)
 
             label   = f"mid_{x0:.4f}_wid_{w:.4f}"
             run_dir = os.path.join(output_dir, label)
@@ -739,7 +737,7 @@ class WindowMomentScanner:
         ratio_charges        = np.full((n_obs, len(midpoints), len(widths)), np.nan)
         sigma_before_charges = np.zeros(n_obs)
         central_charges      = np.zeros(n_obs)
-        boundary             = np.zeros((len(midpoints), len(widths)), dtype=bool)
+        boundary             = saved['boundary'].copy()
 
         charges_path = os.path.join(output_dir, 'results_charges.npz')
         if not force and os.path.exists(charges_path):
@@ -778,8 +776,6 @@ class WindowMomentScanner:
             if np.all(np.isfinite(ratio_charges[:, i, j])):
                 print(f"({idx}/{n_total}) [mid_{x0:.4f}_wid_{w:.4f}]  ← already done")
                 continue
-
-            boundary[i, j] = (x0 - w / 2 < 1e-4) or (x0 + w / 2 > 0.999)
 
             label   = f"mid_{x0:.4f}_wid_{w:.4f}"
             run_dir = os.path.join(output_dir, label)
