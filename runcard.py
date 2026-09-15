@@ -38,6 +38,20 @@ cfg = {
     "moment_xmin":  1e-4,   # lower x bound for ∫ x^n f(x) dx  (n = 0,1,2,3)
     "moment_xmax":  0.999,  # upper x bound
 
+    # ── Tensor-charge observables (for run_charges / plot_charges) ────────────
+    "charge_xmin": 1e-4,
+    "charge_xmax": 0.999,
+    "charge_observables": [
+        {"label": r"$g_T^{u-d}$",
+         "flavor": "u-d",           "moment": 0, "weight": "1"},
+        {"label": r"$g_T^u$",
+         "flavor": "u",             "moment": 0, "weight": "1"},
+        {"label": r"$g_T^d$",
+         "flavor": "d",             "moment": 0, "weight": "1"},
+        {"label": r"$\langle x(\delta u^+ - \delta d^+)\rangle$",
+         "flavor": "u+ubar-d-dbar", "moment": 1, "weight": "1"},
+    ],
+
     # ── Output ────────────────────────────────────────────────────────────────
     "output_dir":  "scan_results",   # heatmap.pdf / heatmap_moments_runcard.pdf saved here
     "epump_path":  "./ePump_kp20221218/src/UpdatePDFs",
