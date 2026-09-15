@@ -53,6 +53,7 @@ cfg = {
     ],
 
     # ── Output ────────────────────────────────────────────────────────────────
+    "pdf_label":   "CT18NNLO",       # human-readable name used in plot titles (optional)
     "output_dir":  "scan_results",   # heatmap.pdf / heatmap_moments_runcard.pdf saved here
     "epump_path":  "./ePump_kp20221218/src/UpdatePDFs",
     "lhapdf_path": None,     # optional extra LHAPDF data path

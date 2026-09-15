@@ -401,9 +401,11 @@ class WindowMomentScanner:
                 f"No saved state at {results_path}. Run the scan first.")
 
         saved = np.load(results_path, allow_pickle=True)
-        self._pdf_name = str(saved['pdf_name'])
-        mc2h_str       = str(saved['mc2h_dir'])
-        self._mc2h_dir = mc2h_str if mc2h_str else None
+        self._pdf_name       = str(saved['pdf_name'])
+        mc2h_str             = str(saved['mc2h_dir'])
+        self._mc2h_dir       = mc2h_str if mc2h_str else None
+        self.sigma_before_ww = saved['sigma_before_ww'] if 'sigma_before_ww' in saved else None
+        self.central_ww      = saved['central_ww']      if 'central_ww'      in saved else None
 
         setup_lhapdf_path(self.cfg.get('lhapdf_path'))
         if self._mc2h_dir:
@@ -501,6 +503,8 @@ class WindowMomentScanner:
                      ratio_moments=ratio_moments,
                      sigma_before_moments=sigma_before_moments,
                      central_moments=central_moments_arr,
+                     sigma_before_ww=self.sigma_before_ww if self.sigma_before_ww is not None else np.array([]),
+                     central_ww=self.central_ww           if self.central_ww      is not None else np.array([]),
                      midpoints=np.array(midpoints),
                      widths=np.array(widths),
                      boundary=boundary,
@@ -530,6 +534,10 @@ class WindowMomentScanner:
         self.boundary             = data['boundary']
         self.sigma_before_moments = data['sigma_before_moments'] if 'sigma_before_moments' in data else None
         self.central_moments      = data['central_moments']      if 'central_moments'      in data else None
+        ww = data['sigma_before_ww'] if 'sigma_before_ww' in data else None
+        self.sigma_before_ww = ww if (ww is not None and ww.size > 0) else None
+        cw = data['central_ww'] if 'central_ww' in data else None
+        self.central_ww      = cw if (cw is not None and cw.size > 0) else None
         print(f"Moment results loaded ← {moments_path}")
         return self
 
@@ -586,8 +594,11 @@ class WindowMomentScanner:
 
         ax.set_xlabel('Window width  $w$')
         ax.set_ylabel('Window midpoint  $x_0$')
-        ax.set_title(
-            f"{cfg['pdf']}    {cfg['flavor']}    {obs_label}    $Q^2 = {cfg['Q2']}$ GeV$^2$"
+        pdf_label = cfg.get('pdf_label', cfg['pdf'])
+        fig.suptitle(
+            f"{pdf_label} — Window moment profiling\n"
+            f"{cfg['flavor']}    {obs_label}    $Q^2 = {cfg['Q2']}$ GeV$^2$",
+            fontsize=12,
         )
         plt.tight_layout()
 
@@ -648,6 +659,15 @@ class WindowMomentScanner:
                             W_e[j + 1] - W_e[j], M_e[i + 1] - M_e[i],
                             fill=False, hatch='///', edgecolor='white', linewidth=0.5,
                         ))
+                    if (self.sigma_before_ww is not None and
+                            self.central_ww is not None and
+                            np.isfinite(self.sigma_before_ww[i, j]) and
+                            abs(self.central_ww[i, j]) > 0):
+                        pct = 100 * self.sigma_before_ww[i, j] / abs(self.central_ww[i, j])
+                        cx = (W_e[j] + W_e[j + 1]) / 2
+                        cy = (M_e[i] + M_e[i + 1]) / 2
+                        ax.text(cx, cy, f"{pct:.0f}%",
+                                ha='center', va='center', fontsize=7, color='white')
 
             ax.set_xlabel('Window width  $w$')
             ax.set_ylabel('Window midpoint  $x_0$')
@@ -659,9 +679,10 @@ class WindowMomentScanner:
             else:
                 ax.set_title(rf'$n = {ni}$')
 
+        pdf_label = cfg.get('pdf_label', cfg['pdf'])
         fig.suptitle(
-            f"{cfg['pdf']}    {cfg['flavor']}    window: {obs_label}"
-            f"    $Q^2 = {cfg['Q2']}$ GeV$^2$",
+            f"{pdf_label} — Full-moment profiling\n"
+            f"{cfg['flavor']}    window: {obs_label}    $Q^2 = {cfg['Q2']}$ GeV$^2$",
             fontsize=13,
         )
 
@@ -707,9 +728,11 @@ class WindowMomentScanner:
                 f"No saved state at {results_path}. Run the scan first.")
 
         saved = np.load(results_path, allow_pickle=True)
-        self._pdf_name = str(saved['pdf_name'])
-        mc2h_str       = str(saved['mc2h_dir'])
-        self._mc2h_dir = mc2h_str if mc2h_str else None
+        self._pdf_name       = str(saved['pdf_name'])
+        mc2h_str             = str(saved['mc2h_dir'])
+        self._mc2h_dir       = mc2h_str if mc2h_str else None
+        self.sigma_before_ww = saved['sigma_before_ww'] if 'sigma_before_ww' in saved else None
+        self.central_ww      = saved['central_ww']      if 'central_ww'      in saved else None
 
         setup_lhapdf_path(self.cfg.get('lhapdf_path'))
         if self._mc2h_dir:
@@ -811,6 +834,8 @@ class WindowMomentScanner:
                      central_charges=central_charges,
                      charge_labels=np.array([obs.get('label', obs['flavor'])
                                              for obs in charge_observables]),
+                     sigma_before_ww=self.sigma_before_ww if self.sigma_before_ww is not None else np.array([]),
+                     central_ww=self.central_ww           if self.central_ww      is not None else np.array([]),
                      midpoints=np.array(midpoints),
                      widths=np.array(widths),
                      boundary=boundary,
@@ -842,6 +867,10 @@ class WindowMomentScanner:
         self.midpoints            = data['midpoints'].tolist()
         self.widths               = data['widths'].tolist()
         self.boundary             = data['boundary']
+        ww = data['sigma_before_ww'] if 'sigma_before_ww' in data else None
+        self.sigma_before_ww = ww if (ww is not None and ww.size > 0) else None
+        cw = data['central_ww'] if 'central_ww' in data else None
+        self.central_ww      = cw if (cw is not None and cw.size > 0) else None
         print(f"Charge results loaded ← {charges_path}")
         return self
 
@@ -896,6 +925,15 @@ class WindowMomentScanner:
                             W_e[j + 1] - W_e[j], M_e[i + 1] - M_e[i],
                             fill=False, hatch='///', edgecolor='white', linewidth=0.5,
                         ))
+                    if (self.sigma_before_ww is not None and
+                            self.central_ww is not None and
+                            np.isfinite(self.sigma_before_ww[i, j]) and
+                            abs(self.central_ww[i, j]) > 0):
+                        pct = 100 * self.sigma_before_ww[i, j] / abs(self.central_ww[i, j])
+                        cx = (W_e[j] + W_e[j + 1]) / 2
+                        cy = (M_e[i] + M_e[i + 1]) / 2
+                        ax.text(cx, cy, f"{pct:.0f}%",
+                                ha='center', va='center', fontsize=7, color='white')
 
             ax.set_xlabel('Window width  $w$')
             ax.set_ylabel('Window midpoint  $x_0$')
@@ -912,9 +950,10 @@ class WindowMomentScanner:
         for obs_idx in range(n_obs, 4):
             axes_flat[obs_idx].set_visible(False)
 
+        pdf_label = cfg.get('pdf_label', cfg['pdf'])
         fig.suptitle(
-            f"{cfg['pdf']}    window: {obs_label}"
-            f"    $Q^2 = {cfg['Q2']}$ GeV$^2$",
+            f"{pdf_label} — Tensor charge profiling\n"
+            f"window: {obs_label}    $Q^2 = {cfg['Q2']}$ GeV$^2$",
             fontsize=13,
         )
 
