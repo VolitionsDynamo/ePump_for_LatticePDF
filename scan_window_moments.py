@@ -582,14 +582,10 @@ class WindowMomentScanner:
                         W_e[j + 1] - W_e[j], M_e[i + 1] - M_e[i],
                         fill=False, hatch='///', edgecolor='white', linewidth=0.5,
                     ))
-                if (self.sigma_before_ww is not None and
-                        self.central_ww is not None and
-                        np.isfinite(self.sigma_before_ww[i, j]) and
-                        abs(self.central_ww[i, j]) > 0):
-                    pct = 100 * self.sigma_before_ww[i, j] / abs(self.central_ww[i, j])
+                if np.isfinite(self.ratio[i, j]):
                     cx = (W_e[j] + W_e[j + 1]) / 2
                     cy = (M_e[i] + M_e[i + 1]) / 2
-                    ax.text(cx, cy, f"{pct:.0f}%",
+                    ax.text(cx, cy, f"{self.ratio[i, j]:.2f}",
                             ha='center', va='center', fontsize=7, color='white')
 
         ax.set_xlabel('Window width  $w$')
@@ -659,14 +655,10 @@ class WindowMomentScanner:
                             W_e[j + 1] - W_e[j], M_e[i + 1] - M_e[i],
                             fill=False, hatch='///', edgecolor='white', linewidth=0.5,
                         ))
-                    if (self.sigma_before_moments is not None and
-                            self.central_moments is not None and
-                            np.isfinite(self.ratio_moments[ni, i, j]) and
-                            abs(self.central_moments[ni]) > 0):
-                        pct = 100 * self.ratio_moments[ni, i, j] * self.sigma_before_moments[ni] / abs(self.central_moments[ni])
+                    if np.isfinite(self.ratio_moments[ni, i, j]):
                         cx = (W_e[j] + W_e[j + 1]) / 2
                         cy = (M_e[i] + M_e[i + 1]) / 2
-                        ax.text(cx, cy, f"{pct:.1f}%",
+                        ax.text(cx, cy, f"{self.ratio_moments[ni, i, j]:.2f}",
                                 ha='center', va='center', fontsize=7, color='white')
 
             ax.set_xlabel('Window width  $w$')
@@ -925,14 +917,10 @@ class WindowMomentScanner:
                             W_e[j + 1] - W_e[j], M_e[i + 1] - M_e[i],
                             fill=False, hatch='///', edgecolor='white', linewidth=0.5,
                         ))
-                    if (self.sigma_before_charges is not None and
-                            self.central_charges is not None and
-                            np.isfinite(self.ratio_charges[obs_idx, i, j]) and
-                            abs(self.central_charges[obs_idx]) > 0):
-                        pct = 100 * self.ratio_charges[obs_idx, i, j] * self.sigma_before_charges[obs_idx] / abs(self.central_charges[obs_idx])
+                    if np.isfinite(self.ratio_charges[obs_idx, i, j]):
                         cx = (W_e[j] + W_e[j + 1]) / 2
                         cy = (M_e[i] + M_e[i + 1]) / 2
-                        ax.text(cx, cy, f"{pct:.1f}%",
+                        ax.text(cx, cy, f"{self.ratio_charges[obs_idx, i, j]:.2f}",
                                 ha='center', va='center', fontsize=7, color='white')
 
             ax.set_xlabel('Window width  $w$')
