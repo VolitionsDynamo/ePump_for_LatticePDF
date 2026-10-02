@@ -965,6 +965,477 @@ class WindowMomentScanner:
         return fig
 
 
+class MomentAccumulationScanner:
+    """
+    Profile a fixed Gaussian window with increasing simultaneous moment constraints.
+
+    For n = 1 … max_n, runs ePump with window moments 1..n as simultaneous
+    constraints, then records σ_after / σ_before for:
+      - each window moment 1..max_n
+      - every tensor-charge observable in cfg['charge_observables']
+      - full polynomial moments ∫ x^n f(x) dx for n = 0, 1, 2, 3
+
+    Parameters
+    ----------
+    cfg : dict or str
+        Configuration dict (must contain a ``moment_scan`` sub-dict), or path
+        to a runcard file.
+    """
+
+    def __init__(self, cfg):
+        if isinstance(cfg, (str, os.PathLike)):
+            cfg = load_runcard(str(cfg))
+        self.cfg = cfg
+
+        # Results — populated by run()
+        self.n_values             = None  # [1, 2, ..., max_n]
+        self.ratio_window         = None  # (max_n, max_n): window moment k vs n constraints
+        self.ratio_charges        = None  # (n_obs, max_n)
+        self.ratio_poly_moments   = None  # (4, max_n)
+        self.sigma_before_window  = None  # (max_n,)
+        self.sigma_before_charges = None  # (n_obs,)
+        self.sigma_before_poly    = None  # (4,)
+        self.central_window       = None  # (max_n,)
+        self.central_charges      = None  # (n_obs,)
+        self.central_poly         = None  # (4,)
+        self.charge_labels        = None
+
+        # Internal — populated by setup()
+        self._pdf_name = None
+        self._mc2h_dir = None
+
+    # ------------------------------------------------------------------
+    def setup(self):
+        """Configure LHAPDF paths and convert MC replicas to Hessian (once)."""
+        cfg        = self.cfg
+        output_dir = os.path.abspath(cfg['output_dir'])
+        ms_dir     = os.path.join(output_dir, 'moment_accumulation')
+        os.makedirs(ms_dir, exist_ok=True)
+        setup_lhapdf_path(cfg.get('lhapdf_path'))
+
+        pdf_name = cfg['pdf']
+        err_type = detect_pdf_error_type(pdf_name)
+        if err_type not in ('replicas', 'mc'):
+            print(f"PDF '{pdf_name}' is {err_type!r} — no conversion needed.")
+            self._pdf_name = pdf_name
+            self._mc2h_dir = None
+        else:
+            mc2h_dir = os.path.join(output_dir, '_hessian')
+            os.makedirs(mc2h_dir, exist_ok=True)
+            print(f"Converting '{pdf_name}' (MC replicas) → asymmetric Hessian in {mc2h_dir} …")
+            hessian_name, _ = convert_mc_to_hessian(
+                pdf_name,
+                neig=cfg.get('mc2h_neig', 50),
+                Q=float(cfg.get('mc2h_Q', 1.0)),
+                epsilon=float(cfg.get('mc2h_epsilon', 1000.0)),
+                output_dir=mc2h_dir,
+                max_nf=int(cfg.get('mc2h_max_nf', 3)),
+            )
+            setup_lhapdf_path(custom_path=mc2h_dir)
+            lhapdf.setPaths([mc2h_dir] + lhapdf.paths())
+            print(f"  → '{hessian_name}'")
+            self._pdf_name = hessian_name
+            self._mc2h_dir = mc2h_dir
+
+        return self
+
+    # ------------------------------------------------------------------
+    def run(self, force=False):
+        """Run moment accumulation: profile moments 1..n for n = 1..max_n.
+
+        For each level n, adds window moments 1..n as simultaneous ePump
+        constraints, then evaluates uncertainties on all tracked quantities.
+
+        Parameters
+        ----------
+        force : bool
+            If True, ignore previously saved results and rerun all levels.
+        """
+        if self._pdf_name is None:
+            self.setup()
+
+        cfg    = self.cfg
+        ms_cfg = cfg['moment_scan']
+
+        x0      = float(ms_cfg['x0'])
+        w       = float(ms_cfg['w'])
+        weight  = ms_cfg.get('weight', 'gaussian')
+        max_n   = int(ms_cfg['max_n'])
+        rel_unc = float(ms_cfg.get('rel_unc', 0.10))
+        corr    = ms_cfg.get('corr', None)
+
+        flavor             = cfg['flavor']
+        Q2                 = float(cfg['Q2'])
+        nx                 = int(cfg['nx'])
+        charge_xmin        = float(cfg.get('charge_xmin', cfg.get('moment_xmin', 1e-4)))
+        charge_xmax        = float(cfg.get('charge_xmax', cfg.get('moment_xmax', 0.999)))
+        moment_xmin        = float(cfg.get('moment_xmin', 1e-4))
+        moment_xmax        = float(cfg.get('moment_xmax', 0.999))
+        charge_observables = cfg.get('charge_observables', [])
+
+        output_dir = os.path.abspath(cfg['output_dir'])
+        ms_dir     = os.path.join(output_dir, 'moment_accumulation')
+        os.makedirs(ms_dir, exist_ok=True)
+        epump_path = os.path.abspath(cfg.get('epump_path', './ePump_kp20221218/src/UpdatePDFs'))
+        pdf_name   = self._pdf_name
+        mc2h_dir   = self._mc2h_dir
+
+        xmin = max(1e-4, x0 - w / 2)
+        xmax = min(0.999, x0 + w / 2)
+
+        parsed_flavor = parse_flavor_expression(flavor)
+
+        base_set     = lhapdf.getPDFSet(pdf_name)
+        base_central = base_set.mkPDF(0)
+        base_members = base_set.mkPDFs()
+
+        n_obs    = len(charge_observables)
+        n_orders = 4
+
+        # Central values and base uncertainties for window moments 1..max_n
+        window_central      = np.zeros(max_n)
+        sigma_before_window = np.zeros(max_n)
+        for k in range(max_n):
+            kw = dict(weight_type=weight, moment=k + 1)
+            window_central[k] = compute_integrated_moment(
+                base_central, parsed_flavor, xmin, xmax, nx, Q2, **kw)
+            base_vals = [compute_integrated_moment(
+                             m, parsed_flavor, xmin, xmax, nx, Q2, **kw)
+                         for m in base_members]
+            o = base_set.uncertainty(base_vals)
+            sigma_before_window[k] = (o.errminus + o.errplus) / 2.0
+
+        # Base uncertainties for charge observables
+        parsed_charge_terms  = []
+        sigma_before_charges = np.zeros(n_obs)
+        central_charges      = np.zeros(n_obs)
+        for obs_idx, obs in enumerate(charge_observables):
+            parsed = parse_flavor_expression(obs['flavor'])
+            parsed_charge_terms.append(parsed)
+            kw = dict(weight_type='1', moment=obs.get('moment', 0))
+            base_vals = [compute_integrated_moment(
+                             m, parsed, charge_xmin, charge_xmax, nx, Q2, **kw)
+                         for m in base_members]
+            o = base_set.uncertainty(base_vals)
+            sigma_before_charges[obs_idx] = (o.errminus + o.errplus) / 2.0
+            central_charges[obs_idx] = compute_integrated_moment(
+                base_central, parsed, charge_xmin, charge_xmax, nx, Q2, **kw)
+
+        # Base uncertainties for polynomial moments n = 0..3
+        sigma_before_poly = np.zeros(n_orders)
+        central_poly      = np.zeros(n_orders)
+        for ni in range(n_orders):
+            kw = dict(weight_type='1', moment=ni)
+            base_vals = [compute_integrated_moment(
+                             m, parsed_flavor, moment_xmin, moment_xmax, nx, Q2, **kw)
+                         for m in base_members]
+            o = base_set.uncertainty(base_vals)
+            sigma_before_poly[ni] = (o.errminus + o.errplus) / 2.0
+            central_poly[ni] = compute_integrated_moment(
+                base_central, parsed_flavor, moment_xmin, moment_xmax, nx, Q2, **kw)
+
+        # Result arrays — last axis is n_constraints index (0 = only moment 1)
+        ratio_window       = np.full((max_n, max_n), np.nan)
+        ratio_charges_buf  = np.full((max(n_obs, 1), max_n), np.nan)
+        ratio_poly_moments = np.full((n_orders, max_n), np.nan)
+
+        # Attempt to resume from a previous run
+        results_path = os.path.join(ms_dir, 'results_moment_scan.npz')
+        if not force and os.path.exists(results_path):
+            saved = np.load(results_path, allow_pickle=True)
+            if (int(saved['max_n']) == max_n and
+                    saved['ratio_charges'].shape[0] == max(n_obs, 1)):
+                ratio_window[...]       = saved['ratio_window']
+                ratio_charges_buf[...]  = saved['ratio_charges']
+                ratio_poly_moments[...] = saved['ratio_poly_moments']
+                n_done = int(np.sum(np.isfinite(ratio_window[0])))
+                if n_done:
+                    print(f"Resuming: {n_done}/{max_n} levels already done.")
+
+        # Main loop: n = 1 .. max_n
+        for n in range(1, max_n + 1):
+            lvl = n - 1  # column index
+
+            if (np.all(np.isfinite(ratio_window[:, lvl])) and
+                    np.all(np.isfinite(ratio_poly_moments[:, lvl]))):
+                print(f"n={n}: ← already done")
+                continue
+
+            vals   = window_central[:n]
+            sigmas = rel_unc * np.abs(vals)
+
+            # Build Cholesky structure for correlated measurements
+            L = None
+            if corr is not None:
+                rho = np.array(corr, dtype=float)[:n, :n]
+                C   = np.outer(sigmas, sigmas) * rho
+                jitter = 1e-12 * max(float(np.abs(C).max()), 1.0)
+                C  += np.eye(n) * jitter
+                L   = np.linalg.cholesky(C)
+
+            n_tag    = '_'.join(str(k) for k in range(1, n + 1))
+            label    = f"macc_n{n_tag}"
+            run_dir  = os.path.join(ms_dir, label)
+            run_name = os.path.join(run_dir, label)
+
+            if mc2h_dir and mc2h_dir not in lhapdf.paths():
+                lhapdf.setPaths([mc2h_dir] + lhapdf.paths())
+
+            already_profiled = os.path.isdir(os.path.join(run_dir, label))
+            if already_profiled:
+                if run_dir not in lhapdf.paths():
+                    lhapdf.setPaths([run_dir] + lhapdf.paths())
+                profiled_set = lhapdf.getPDFSet(label)
+            else:
+                ep = EProfiler(pdf_name, run_name, epump_path=epump_path,
+                               lhapdf_path=mc2h_dir)
+                ep.pdf_set     = base_set
+                ep.pdf_members = base_members
+
+                for k in range(n):
+                    val_k = float(vals[k])
+                    if L is not None:
+                        stat_k    = 0.0
+                        cor_sys_k = [L[k, j] / val_k * 100.0 for j in range(n)]
+                        uncor_k   = 0.0
+                    else:
+                        stat_k    = float(sigmas[k])
+                        cor_sys_k = []
+                        uncor_k   = 0.0
+
+                    ep.add_measurement(
+                        x=x0, Q2=Q2, value=val_k,
+                        stat=stat_k, uncor_sys=uncor_k, cor_sys=cor_sys_k,
+                        obs_type='moment', flavor=flavor,
+                        xmin=xmin, xmax=xmax, nx=nx,
+                        weight=weight, moment=k + 1,
+                    )
+
+                ep.generate_files()
+                ep.run()
+                profiled_set = ep.profiled_set
+
+            # Evaluate all tracked quantities on the profiled set
+            lhapdf.setVerbosity(0)
+
+            for k in range(max_n):
+                kw = dict(weight_type=weight, moment=k + 1)
+                prof_vals = [compute_integrated_moment(
+                                 profiled_set.mkPDF(m), parsed_flavor,
+                                 xmin, xmax, nx, Q2, **kw)
+                             for m in range(profiled_set.size)]
+                p = profiled_set.uncertainty(prof_vals)
+                sigma_a = (p.errminus + p.errplus) / 2.0
+                ratio_window[k, lvl] = (sigma_a / sigma_before_window[k]
+                                        if sigma_before_window[k] > 0 else np.nan)
+
+            for obs_idx, obs in enumerate(charge_observables):
+                parsed = parsed_charge_terms[obs_idx]
+                kw = dict(weight_type='1', moment=obs.get('moment', 0))
+                prof_vals = [compute_integrated_moment(
+                                 profiled_set.mkPDF(m), parsed,
+                                 charge_xmin, charge_xmax, nx, Q2, **kw)
+                             for m in range(profiled_set.size)]
+                p = profiled_set.uncertainty(prof_vals)
+                sigma_a = (p.errminus + p.errplus) / 2.0
+                ratio_charges_buf[obs_idx, lvl] = (
+                    sigma_a / sigma_before_charges[obs_idx]
+                    if sigma_before_charges[obs_idx] > 0 else np.nan)
+
+            for ni in range(n_orders):
+                kw = dict(weight_type='1', moment=ni)
+                prof_vals = [compute_integrated_moment(
+                                 profiled_set.mkPDF(m), parsed_flavor,
+                                 moment_xmin, moment_xmax, nx, Q2, **kw)
+                             for m in range(profiled_set.size)]
+                p = profiled_set.uncertainty(prof_vals)
+                sigma_a = (p.errminus + p.errplus) / 2.0
+                ratio_poly_moments[ni, lvl] = (sigma_a / sigma_before_poly[ni]
+                                               if sigma_before_poly[ni] > 0 else np.nan)
+
+            lhapdf.setVerbosity(1)
+
+            win_str = '  '.join(
+                f"wm{k+1}:{ratio_window[k, lvl]:.3f}" for k in range(max_n))
+            print(f"n={n}:  {win_str}")
+
+            np.savez(results_path,
+                     max_n=max_n, x0=x0, w=w, weight=weight,
+                     ratio_window=ratio_window,
+                     ratio_charges=ratio_charges_buf,
+                     ratio_poly_moments=ratio_poly_moments,
+                     sigma_before_window=sigma_before_window,
+                     sigma_before_charges=sigma_before_charges,
+                     sigma_before_poly=sigma_before_poly,
+                     central_window=window_central,
+                     central_charges=central_charges,
+                     central_poly=central_poly,
+                     charge_labels=np.array([obs.get('label', obs['flavor'])
+                                             for obs in charge_observables]),
+                     pdf_name=np.array(self._pdf_name),
+                     mc2h_dir=np.array(self._mc2h_dir or ''))
+
+        self.n_values             = list(range(1, max_n + 1))
+        self.ratio_window         = ratio_window
+        self.ratio_charges        = ratio_charges_buf[:n_obs] if n_obs else np.empty((0, max_n))
+        self.ratio_poly_moments   = ratio_poly_moments
+        self.sigma_before_window  = sigma_before_window
+        self.sigma_before_charges = sigma_before_charges
+        self.sigma_before_poly    = sigma_before_poly
+        self.central_window       = window_central
+        self.central_charges      = central_charges
+        self.central_poly         = central_poly
+        self.charge_labels = [obs.get('label', obs['flavor'])
+                               for obs in charge_observables]
+        print(f"Results saved → {results_path}")
+        return self
+
+    # ------------------------------------------------------------------
+    def load(self):
+        """Load results saved by a previous run() call without re-running ePump."""
+        output_dir   = os.path.abspath(self.cfg['output_dir'])
+        results_path = os.path.join(output_dir, 'moment_accumulation',
+                                    'results_moment_scan.npz')
+        if not os.path.exists(results_path):
+            raise FileNotFoundError(
+                f"No saved results at {results_path}. Call run() first.")
+
+        saved = np.load(results_path, allow_pickle=True)
+        max_n = int(saved['max_n'])
+        n_obs = len(saved['charge_labels'])
+
+        self.n_values             = list(range(1, max_n + 1))
+        self.ratio_window         = saved['ratio_window']
+        self.ratio_charges        = saved['ratio_charges'][:n_obs]
+        self.ratio_poly_moments   = saved['ratio_poly_moments']
+        self.sigma_before_window  = saved['sigma_before_window']
+        self.sigma_before_charges = saved['sigma_before_charges']
+        self.sigma_before_poly    = saved['sigma_before_poly']
+        self.central_window       = saved['central_window']
+        self.central_charges      = saved['central_charges']
+        self.central_poly         = saved['central_poly']
+        self.charge_labels        = saved['charge_labels'].tolist()
+        self._pdf_name            = str(saved['pdf_name'])
+        mc2h_str                  = str(saved['mc2h_dir'])
+        self._mc2h_dir            = mc2h_str if mc2h_str else None
+        print(f"Loaded ← {results_path}")
+        return self
+
+    # ------------------------------------------------------------------
+    def plot(self, save=True):
+        """Plot σ_after/σ_before vs number of simultaneous profiling moments.
+
+        Panels (left to right, top to bottom):
+          - one per window moment 1..max_n
+          - one per tensor-charge observable
+          - one per polynomial moment n = 0, 1, 2, 3
+
+        Parameters
+        ----------
+        save : bool
+            Write figure to output_dir/moment_accumulation/moment_accumulation.pdf.
+
+        Returns
+        -------
+        matplotlib.figure.Figure
+        """
+        if self.ratio_window is None:
+            raise RuntimeError("Call run() or load() before plot().")
+
+        import matplotlib.pyplot as plt
+
+        cfg    = self.cfg
+        ms_cfg = cfg['moment_scan']
+        n_vals = self.n_values
+        max_n  = len(n_vals)
+        x0     = ms_cfg['x0']
+        w      = ms_cfg['w']
+        weight = ms_cfg.get('weight', 'gaussian')
+
+        n_obs    = self.ratio_charges.shape[0]
+        n_orders = self.ratio_poly_moments.shape[0]
+        n_panels = max_n + n_obs + n_orders
+
+        ncols = min(n_panels, 4)
+        nrows = (n_panels + ncols - 1) // ncols
+        fig, axes = plt.subplots(nrows, ncols,
+                                 figsize=(4 * ncols, 3.5 * nrows),
+                                 squeeze=False)
+        axes_flat = axes.flatten()
+        panel     = 0
+
+        def _draw(ax, ydata, color, title):
+            ax.plot(n_vals, ydata, 'o-', color=color)
+            ax.axhline(1.0, color='gray', ls='--', lw=0.8)
+            ax.set_ylim(0, 1.1)
+            ax.set_xticks(n_vals)
+            ax.set_xlabel('Moments constrained')
+            ax.set_ylabel(r'$\sigma_{\rm after}/\sigma_{\rm before}$')
+            ax.set_title(title)
+
+        # Window moment panels
+        for k in range(max_n):
+            sym = (rf'$g_{{{k+1}}}$' if weight == 'gaussian'
+                   else rf'$a_{{{k+1}}}$')
+            if (self.sigma_before_window is not None and
+                    self.central_window is not None and
+                    abs(self.central_window[k]) > 0):
+                pct = (100 * self.sigma_before_window[k]
+                       / abs(self.central_window[k]))
+                title = rf"Window {sym}   ($\sigma/\mu={pct:.1f}\%$)"
+            else:
+                title = rf"Window {sym}"
+            _draw(axes_flat[panel], self.ratio_window[k], 'C2', title)
+            panel += 1
+
+        # Charge observable panels
+        for obs_idx in range(n_obs):
+            lbl = self.charge_labels[obs_idx] if self.charge_labels else f"obs {obs_idx}"
+            if (self.sigma_before_charges is not None and
+                    self.central_charges is not None and
+                    abs(self.central_charges[obs_idx]) > 0):
+                pct = (100 * self.sigma_before_charges[obs_idx]
+                       / abs(self.central_charges[obs_idx]))
+                title = rf"{lbl}   ($\sigma/\mu={pct:.1f}\%$)"
+            else:
+                title = lbl
+            _draw(axes_flat[panel], self.ratio_charges[obs_idx], 'C0', title)
+            panel += 1
+
+        # Polynomial moment panels
+        for ni in range(n_orders):
+            if (self.sigma_before_poly is not None and
+                    self.central_poly is not None and
+                    abs(self.central_poly[ni]) > 0):
+                pct = (100 * self.sigma_before_poly[ni]
+                       / abs(self.central_poly[ni]))
+                title = rf'Full $n={ni}$   ($\sigma/\mu={pct:.1f}\%$)'
+            else:
+                title = rf'Full $n={ni}$'
+            _draw(axes_flat[panel], self.ratio_poly_moments[ni], 'C1', title)
+            panel += 1
+
+        for k in range(panel, len(axes_flat)):
+            axes_flat[k].set_visible(False)
+
+        pdf_label = cfg.get('pdf_label', cfg['pdf'])
+        fig.suptitle(
+            f"{pdf_label} — Moment accumulation  ({cfg['flavor']})\n"
+            f"{weight}  $x_0={x0}$  $w={w}$    $Q^2={cfg['Q2']}$ GeV$^2$",
+            fontsize=12,
+        )
+        plt.tight_layout()
+
+        if save:
+            ms_dir = os.path.join(os.path.abspath(cfg['output_dir']),
+                                  'moment_accumulation')
+            out = os.path.join(ms_dir, 'moment_accumulation.pdf')
+            fig.savefig(out, dpi=150)
+            print(f"Plot → {out}")
+
+        return fig
+
+
 # ── Terminal entry point ───────────────────────────────────────────────────────
 
 def main():
@@ -972,13 +1443,20 @@ def main():
 
     if len(sys.argv) < 2:
         print(
-            f"Usage: {sys.argv[0]} runcard.py [run|recompute|moments|charges]",
+            f"Usage: {sys.argv[0]} runcard.py [run|recompute|moments|charges|moment_scan]",
             file=sys.stderr,
         )
         sys.exit(1)
 
-    scanner = WindowMomentScanner(sys.argv[1])
     cmd = sys.argv[2] if len(sys.argv) >= 3 else 'run'
+
+    if cmd == 'moment_scan':
+        scanner = MomentAccumulationScanner(sys.argv[1])
+        scanner.run()
+        scanner.plot(save=True)
+        return
+
+    scanner = WindowMomentScanner(sys.argv[1])
 
     if cmd == 'recompute':
         scanner.recompute()
