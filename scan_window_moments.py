@@ -1427,9 +1427,9 @@ class MomentAccumulationScanner:
         plt.tight_layout()
 
         if save:
-            ms_dir = os.path.join(os.path.abspath(cfg['output_dir']),
-                                  'moment_accumulation')
-            out = os.path.join(ms_dir, 'moment_accumulation.pdf')
+            suffix = '_' + os.path.basename(os.path.abspath(cfg['output_dir']))
+            out = os.path.join(os.path.abspath(cfg['output_dir']),
+                               f"moment_accumulation{suffix}.pdf")
             fig.savefig(out, dpi=150)
             print(f"Plot → {out}")
 
