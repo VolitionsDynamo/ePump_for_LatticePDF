@@ -1,0 +1,279 @@
+-----------------------------------------------------------
+Initializing Main input from file: phase_d.in
+-----------------------------------------------------------
+
+Global weight factor for New data sets w=1
+
++++ N(EV pairs)                       N(Data Sets)   PDFtype(C/L/N)    DiagonalQuad(Y/N)    Dyn_Tol?(Y/N)  Tol_squared 
+        20             1              L              N              1
++++ ObservableFile                    N(Observables)  Data?(Y/N)      Error_type     Weight          
+ phase_d                      1                Y           4          1
++++     PDFname                       PDFout   
+    ./s/JAMDiFF23-transversity_lo_nolat_hessian_20        ./phase_d/phase_d
+
+-----------------------------------------------------------------
+Initializing Theory arrays for Data Set 1: phase_d.theory
+-----------------------------------------------------------------
+
+*
+*
+*
+Theory column
+      1
+    D1         D2         D3        X[00]        X[01]        X[02]        X[03]        X[04]        X[05]        X[06]        X[07]        X[08]        X[09]        X[10]        X[11]        X[12]        X[13]        X[14]        X[15]        X[16]        X[17]        X[18]        X[19]        X[20]        X[21]        X[22]        X[23]        X[24]        X[25]        X[26]        X[27]        X[28]        X[29]        X[30]        X[31]        X[32]        X[33]        X[34]        X[35]        X[36]        X[37]        X[38]        X[39]        X[40]
+0.000E+00  0.000E+00  0.000E+00  5.69264E-01  5.71420E-01  5.67108E-01  6.47112E-01  4.91416E-01  5.22189E-01  6.16339E-01  5.11307E-01  6.27222E-01  5.89340E-01  5.49188E-01  6.02133E-01  5.36395E-01  5.70023E-01  5.68505E-01  5.71756E-01  5.66772E-01  5.61499E-01  5.77029E-01  5.71906E-01  5.66622E-01  5.66069E-01  5.72459E-01  5.70276E-01  5.68252E-01  5.68391E-01  5.70137E-01  5.72787E-01  5.65741E-01  5.67702E-01  5.70826E-01  5.69323E-01  5.69205E-01  5.68938E-01  5.69590E-01  5.69280E-01  5.69248E-01  5.68861E-01  5.69667E-01  5.68857E-01  5.69671E-01
+
+-----------------------------------------------------------------
+Initializing Data arrays for Data Set 1: phase_d.data , error_type 4
+-----------------------------------------------------------------
+
+*
+* Generated dynamically by e_profiler.py
+*
+*  x    Q2    value         stat        uncor_sys   cor_sys...
+#corr_err  data stat uncor_sys cor_begin
+             0                3                4                5
+
+  Inverse covariance matrix to be constructed from 
+  uncorrelated errors and correlated systematic errors.
+  Nlam = 0  weight (including global weight factor) = 1.00000E+00
+
+ a      XE[a]        s[a]       
+ 1   1.00000E-01  1.00000E-02  
+
+
+data set: 0 PDF set: 0 chi^2: 2.202E+03
+data set: 0 PDF set: 1 chi^2: 2.222E+03
+data set: 0 PDF set: 2 chi^2: 2.182E+03
+data set: 0 PDF set: 3 chi^2: 2.993E+03
+data set: 0 PDF set: 4 chi^2: 1.532E+03
+data set: 0 PDF set: 5 chi^2: 1.782E+03
+data set: 0 PDF set: 6 chi^2: 2.666E+03
+data set: 0 PDF set: 7 chi^2: 1.692E+03
+data set: 0 PDF set: 8 chi^2: 2.780E+03
+data set: 0 PDF set: 9 chi^2: 2.395E+03
+data set: 0 PDF set: 10 chi^2: 2.018E+03
+data set: 0 PDF set: 11 chi^2: 2.521E+03
+data set: 0 PDF set: 12 chi^2: 1.904E+03
+data set: 0 PDF set: 13 chi^2: 2.209E+03
+data set: 0 PDF set: 14 chi^2: 2.195E+03
+data set: 0 PDF set: 15 chi^2: 2.226E+03
+data set: 0 PDF set: 16 chi^2: 2.179E+03
+data set: 0 PDF set: 17 chi^2: 2.130E+03
+data set: 0 PDF set: 18 chi^2: 2.276E+03
+data set: 0 PDF set: 19 chi^2: 2.227E+03
+data set: 0 PDF set: 20 chi^2: 2.177E+03
+data set: 0 PDF set: 21 chi^2: 2.172E+03
+data set: 0 PDF set: 22 chi^2: 2.232E+03
+data set: 0 PDF set: 23 chi^2: 2.212E+03
+data set: 0 PDF set: 24 chi^2: 2.193E+03
+data set: 0 PDF set: 25 chi^2: 2.194E+03
+data set: 0 PDF set: 26 chi^2: 2.210E+03
+data set: 0 PDF set: 27 chi^2: 2.235E+03
+data set: 0 PDF set: 28 chi^2: 2.169E+03
+data set: 0 PDF set: 29 chi^2: 2.187E+03
+data set: 0 PDF set: 30 chi^2: 2.217E+03
+data set: 0 PDF set: 31 chi^2: 2.203E+03
+data set: 0 PDF set: 32 chi^2: 2.202E+03
+data set: 0 PDF set: 33 chi^2: 2.199E+03
+data set: 0 PDF set: 34 chi^2: 2.205E+03
+data set: 0 PDF set: 35 chi^2: 2.202E+03
+data set: 0 PDF set: 36 chi^2: 2.202E+03
+data set: 0 PDF set: 37 chi^2: 2.198E+03
+data set: 0 PDF set: 38 chi^2: 2.206E+03
+data set: 0 PDF set: 39 chi^2: 2.198E+03
+data set: 0 PDF set: 40 chi^2: 2.206E+03
+ Only Linear terms included in updating of best-fit predictions.
+
+ Total Chi2 (z=0)  = 2202.0870
+ Total Chi2 (z=z0) = 16.5262
+
+
+-----------------------------------
+Sorted eigenvalues of M:
+-----------------------------------
+
+132.24849084   0.00000000   0.00000000   0.00000000   0.00000000   0.00000000   0.00000000   0.00000000   0.00000000   0.00000000  -0.00000000  -0.00000000  -0.00000000  -0.00000000  -0.00000000  -0.00000000  -0.00000000  -0.00000000  -0.00000000  -0.00000000 
+
+  Vector zh0[i]=z0[i] from i=1,Ni  (original eigenvector basis)
+ 0     -0.0759
+ 1     -2.7416
+ 2      1.6579
+ 3      2.0411
+ 4     -0.7070
+ 5     -1.1576
+ 6     -0.0267
+ 7     -0.0878
+ 8      0.2735
+ 9     -0.0930
+10      0.1125
+11     -0.0356
+12      0.0307
+13     -0.1241
+14      0.0550
+15     -0.0021
+16      0.0115
+17     -0.0006
+18      0.0142
+19      0.0143
+
+ Length of best-fit zh0 vector is 4.05E+00
+
+  Vector ch0[r] = -sqrt(1+lambda[r])*sum(U[r][i]z0[i] over i=1,Ni) from r=1,Ni  (updated eigenvector basis)
+ 0     46.7500
+ 1      0.0000
+ 2      0.0000
+ 3     -0.0000
+ 4      0.0000
+ 5      0.0000
+ 6     -0.0000
+ 7     -0.0000
+ 8      0.0000
+ 9     -0.0000
+10     -0.0000
+11     -0.0000
+12     -0.0000
+13     -0.0000
+14      0.0000
+15      0.0000
+16     -0.0000
+17     -0.0000
+18     -0.0000
+19      0.0000
+
+ Length of best-fit ch0 vector is 4.67E+01
+
+
+------------------------------------------------------------
+            Original and Updated Delta Chi-Squares
+------------------------------------------------------------
+
+ Delta Chi2 for original global analysis
+ Old 0.0000
+ New 16.4021
+
+ Delta Chi2 for Data Set: phase_d with 1 data points (excluding weight factor w[k] = 1.0000)
+ Old 2202.0870
+ New 0.1240
+ Old Spartyness -18.7314
+ New Spartyness -1.5398
+
+
+ Total Chi2 for new data sets with 1 data points (including weight factors)
+ Old 2202.0870
+ New 0.1240
+
+ Total Chi2 for original global analysis plus new data sets (including weight factors)
+ Old 2202.0870
+ New 16.5262
+
+
+-----------------------------------------------------------------------
+ Original and Updated Shifted Data, Residuals, and Reduced Chi-Squares
+-----------------------------------------------------------------------
+
+
+-----------------------------------------------------------------------
+ Original and Updated Optimal Error Shifts (Nuisance Parameters)
+-----------------------------------------------------------------------
+
+
+---------------------------------------------------------------
+      Original and Updated Predictions and Uncertainties
+---------------------------------------------------------------
+
+ For Observables X[a] in Data Set: phase_d
+
+      a      X[a]      DXsym[a]                 DXasym[a]
+Old   1   5.6926E-01  1.1500E-01       -1.1500E-01  +1.1500E-01
+New   1   1.0352E-01  9.9624E-03       -9.9624E-03  +9.9624E-03
+
+
+
+---------------------------------------
+     Updating PDFs, LHAPDF format 
+---------------------------------------
+nflavors = 11
+-5 -4 -3 -2 -1 1 2 3 4 5 21
+./s/JAMDiFF23-transversity_lo_nolat_hessian_20_0000.dat
+./phase_d/phase_d_0000.dat
+./s/JAMDiFF23-transversity_lo_nolat_hessian_20_0001.dat
+./phase_d/phase_d_0001.dat
+./s/JAMDiFF23-transversity_lo_nolat_hessian_20_0002.dat
+./phase_d/phase_d_0002.dat
+./s/JAMDiFF23-transversity_lo_nolat_hessian_20_0003.dat
+./phase_d/phase_d_0003.dat
+./s/JAMDiFF23-transversity_lo_nolat_hessian_20_0004.dat
+./phase_d/phase_d_0004.dat
+./s/JAMDiFF23-transversity_lo_nolat_hessian_20_0005.dat
+./phase_d/phase_d_0005.dat
+./s/JAMDiFF23-transversity_lo_nolat_hessian_20_0006.dat
+./phase_d/phase_d_0006.dat
+./s/JAMDiFF23-transversity_lo_nolat_hessian_20_0007.dat
+./phase_d/phase_d_0007.dat
+./s/JAMDiFF23-transversity_lo_nolat_hessian_20_0008.dat
+./phase_d/phase_d_0008.dat
+./s/JAMDiFF23-transversity_lo_nolat_hessian_20_0009.dat
+./phase_d/phase_d_0009.dat
+./s/JAMDiFF23-transversity_lo_nolat_hessian_20_0010.dat
+./phase_d/phase_d_0010.dat
+./s/JAMDiFF23-transversity_lo_nolat_hessian_20_0011.dat
+./phase_d/phase_d_0011.dat
+./s/JAMDiFF23-transversity_lo_nolat_hessian_20_0012.dat
+./phase_d/phase_d_0012.dat
+./s/JAMDiFF23-transversity_lo_nolat_hessian_20_0013.dat
+./phase_d/phase_d_0013.dat
+./s/JAMDiFF23-transversity_lo_nolat_hessian_20_0014.dat
+./phase_d/phase_d_0014.dat
+./s/JAMDiFF23-transversity_lo_nolat_hessian_20_0015.dat
+./phase_d/phase_d_0015.dat
+./s/JAMDiFF23-transversity_lo_nolat_hessian_20_0016.dat
+./phase_d/phase_d_0016.dat
+./s/JAMDiFF23-transversity_lo_nolat_hessian_20_0017.dat
+./phase_d/phase_d_0017.dat
+./s/JAMDiFF23-transversity_lo_nolat_hessian_20_0018.dat
+./phase_d/phase_d_0018.dat
+./s/JAMDiFF23-transversity_lo_nolat_hessian_20_0019.dat
+./phase_d/phase_d_0019.dat
+./s/JAMDiFF23-transversity_lo_nolat_hessian_20_0020.dat
+./phase_d/phase_d_0020.dat
+./s/JAMDiFF23-transversity_lo_nolat_hessian_20_0021.dat
+./phase_d/phase_d_0021.dat
+./s/JAMDiFF23-transversity_lo_nolat_hessian_20_0022.dat
+./phase_d/phase_d_0022.dat
+./s/JAMDiFF23-transversity_lo_nolat_hessian_20_0023.dat
+./phase_d/phase_d_0023.dat
+./s/JAMDiFF23-transversity_lo_nolat_hessian_20_0024.dat
+./phase_d/phase_d_0024.dat
+./s/JAMDiFF23-transversity_lo_nolat_hessian_20_0025.dat
+./phase_d/phase_d_0025.dat
+./s/JAMDiFF23-transversity_lo_nolat_hessian_20_0026.dat
+./phase_d/phase_d_0026.dat
+./s/JAMDiFF23-transversity_lo_nolat_hessian_20_0027.dat
+./phase_d/phase_d_0027.dat
+./s/JAMDiFF23-transversity_lo_nolat_hessian_20_0028.dat
+./phase_d/phase_d_0028.dat
+./s/JAMDiFF23-transversity_lo_nolat_hessian_20_0029.dat
+./phase_d/phase_d_0029.dat
+./s/JAMDiFF23-transversity_lo_nolat_hessian_20_0030.dat
+./phase_d/phase_d_0030.dat
+./s/JAMDiFF23-transversity_lo_nolat_hessian_20_0031.dat
+./phase_d/phase_d_0031.dat
+./s/JAMDiFF23-transversity_lo_nolat_hessian_20_0032.dat
+./phase_d/phase_d_0032.dat
+./s/JAMDiFF23-transversity_lo_nolat_hessian_20_0033.dat
+./phase_d/phase_d_0033.dat
+./s/JAMDiFF23-transversity_lo_nolat_hessian_20_0034.dat
+./phase_d/phase_d_0034.dat
+./s/JAMDiFF23-transversity_lo_nolat_hessian_20_0035.dat
+./phase_d/phase_d_0035.dat
+./s/JAMDiFF23-transversity_lo_nolat_hessian_20_0036.dat
+./phase_d/phase_d_0036.dat
+./s/JAMDiFF23-transversity_lo_nolat_hessian_20_0037.dat
+./phase_d/phase_d_0037.dat
+./s/JAMDiFF23-transversity_lo_nolat_hessian_20_0038.dat
+./phase_d/phase_d_0038.dat
+./s/JAMDiFF23-transversity_lo_nolat_hessian_20_0039.dat
+./phase_d/phase_d_0039.dat
+./s/JAMDiFF23-transversity_lo_nolat_hessian_20_0040.dat
+./phase_d/phase_d_0040.dat

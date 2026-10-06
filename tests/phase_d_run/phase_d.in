@@ -1,0 +1,7 @@
++++ N(EV pairs)                       N(Data Sets)   PDFtype(C/L/N)    DiagonalQuad(Y/N)    Dyn_Tol?(Y/N)  Tol_squared 
+        20                                    1                L                  N                   N            1    
++++ ObservableFile                    N(Observables)  Data?(Y/N)      Error_type     Weight          
+        phase_d                             1               Y                4           1
++++     PDFname                       PDFout   
+     ./s/JAMDiFF23-transversity_lo_nolat_hessian_20    ./phase_d/phase_d
+# Generated dynamically by e_profiler.py

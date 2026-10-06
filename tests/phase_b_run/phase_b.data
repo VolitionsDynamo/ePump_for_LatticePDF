@@ -1,0 +1,8 @@
+*
+* Generated dynamically by e_profiler.py
+*
+*  x    Q2    value         stat        uncor_sys   cor_sys...
+#corr_err  data stat uncor_sys cor_begin
+0 3 4 5 6
+x  Q2  value         error
+0.3 4.0 0.1 0.01 0.0

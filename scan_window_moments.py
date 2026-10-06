@@ -1064,6 +1064,14 @@ class MomentAccumulationScanner:
         rel_unc = float(ms_cfg.get('rel_unc', 0.10))
         corr    = ms_cfg.get('corr', None)
 
+        start_n = ms_cfg.get('start_n', None)
+        if start_n is None:
+            start_n = 0 if weight == '1' else 1
+        start_n = int(start_n)
+        if weight == 'gaussian' and start_n == 0:
+            raise ValueError("start_n=0 is invalid for gaussian weight (integral is zero).")
+        n_levels = max_n - start_n + 1
+
         flavor             = cfg['flavor']
         Q2                 = float(cfg['Q2'])
         nx                 = int(cfg['nx'])
@@ -1092,11 +1100,11 @@ class MomentAccumulationScanner:
         n_obs    = len(charge_observables)
         n_orders = 4
 
-        # Central values and base uncertainties for window moments 1..max_n
-        window_central      = np.zeros(max_n)
-        sigma_before_window = np.zeros(max_n)
-        for k in range(max_n):
-            kw = dict(weight_type=weight, moment=k + 1)
+        # Central values and base uncertainties for window moments start_n..max_n
+        window_central      = np.zeros(n_levels)
+        sigma_before_window = np.zeros(n_levels)
+        for k in range(n_levels):
+            kw = dict(weight_type=weight, moment=k + start_n)
             window_central[k] = compute_integrated_moment(
                 base_central, parsed_flavor, xmin, xmax, nx, Q2, **kw)
             base_vals = [compute_integrated_moment(
@@ -1134,46 +1142,47 @@ class MomentAccumulationScanner:
             central_poly[ni] = compute_integrated_moment(
                 base_central, parsed_flavor, moment_xmin, moment_xmax, nx, Q2, **kw)
 
-        # Result arrays — last axis is n_constraints index (0 = only moment 1)
-        ratio_window       = np.full((max_n, max_n), np.nan)
-        ratio_charges_buf  = np.full((max(n_obs, 1), max_n), np.nan)
-        ratio_poly_moments = np.full((n_orders, max_n), np.nan)
+        # Result arrays — last axis is constraint level index (0 = only moment start_n)
+        ratio_window       = np.full((n_levels, n_levels), np.nan)
+        ratio_charges_buf  = np.full((max(n_obs, 1), n_levels), np.nan)
+        ratio_poly_moments = np.full((n_orders, n_levels), np.nan)
 
         # Attempt to resume from a previous run
         results_path = os.path.join(ms_dir, 'results_moment_scan.npz')
         if not force and os.path.exists(results_path):
             saved = np.load(results_path, allow_pickle=True)
             if (int(saved['max_n']) == max_n and
+                    int(saved.get('start_n', 1)) == start_n and
                     saved['ratio_charges'].shape[0] == max(n_obs, 1)):
                 ratio_window[...]       = saved['ratio_window']
                 ratio_charges_buf[...]  = saved['ratio_charges']
                 ratio_poly_moments[...] = saved['ratio_poly_moments']
                 n_done = int(np.sum(np.isfinite(ratio_window[0])))
                 if n_done:
-                    print(f"Resuming: {n_done}/{max_n} levels already done.")
+                    print(f"Resuming: {n_done}/{n_levels} levels already done.")
 
-        # Main loop: n = 1 .. max_n
-        for n in range(1, max_n + 1):
-            lvl = n - 1  # column index
+        # Main loop: n = start_n .. max_n
+        for n in range(start_n, max_n + 1):
+            lvl = n - start_n  # column index
 
             if (np.all(np.isfinite(ratio_window[:, lvl])) and
                     np.all(np.isfinite(ratio_poly_moments[:, lvl]))):
                 print(f"n={n}: ← already done")
                 continue
 
-            vals   = window_central[:n]
+            vals   = window_central[: lvl + 1]
             sigmas = rel_unc * np.abs(vals)
 
             # Build Cholesky structure for correlated measurements
             L = None
             if corr is not None:
-                rho = np.array(corr, dtype=float)[:n, :n]
+                rho = np.array(corr, dtype=float)[: lvl + 1, : lvl + 1]
                 C   = np.outer(sigmas, sigmas) * rho
                 jitter = 1e-12 * max(float(np.abs(C).max()), 1.0)
-                C  += np.eye(n) * jitter
+                C  += np.eye(lvl + 1) * jitter
                 L   = np.linalg.cholesky(C)
 
-            n_tag    = '_'.join(str(k) for k in range(1, n + 1))
+            n_tag    = '_'.join(str(k + start_n) for k in range(lvl + 1))
             label    = f"macc_n{n_tag}"
             run_dir  = os.path.join(ms_dir, label)
             run_name = os.path.join(run_dir, label)
@@ -1192,11 +1201,11 @@ class MomentAccumulationScanner:
                 ep.pdf_set     = base_set
                 ep.pdf_members = base_members
 
-                for k in range(n):
+                for k in range(lvl + 1):
                     val_k = float(vals[k])
                     if L is not None:
                         stat_k    = 0.0
-                        cor_sys_k = [L[k, j] / val_k * 100.0 for j in range(n)]
+                        cor_sys_k = [L[k, j] / val_k * 100.0 for j in range(lvl + 1)]
                         uncor_k   = 0.0
                     else:
                         stat_k    = float(sigmas[k])
@@ -1208,7 +1217,7 @@ class MomentAccumulationScanner:
                         stat=stat_k, uncor_sys=uncor_k, cor_sys=cor_sys_k,
                         obs_type='moment', flavor=flavor,
                         xmin=xmin, xmax=xmax, nx=nx,
-                        weight=weight, moment=k + 1,
+                        weight=weight, moment=k + start_n,
                     )
 
                 ep.generate_files()
@@ -1218,8 +1227,8 @@ class MomentAccumulationScanner:
             # Evaluate all tracked quantities on the profiled set
             lhapdf.setVerbosity(0)
 
-            for k in range(max_n):
-                kw = dict(weight_type=weight, moment=k + 1)
+            for k in range(n_levels):
+                kw = dict(weight_type=weight, moment=k + start_n)
                 prof_vals = [compute_integrated_moment(
                                  profiled_set.mkPDF(m), parsed_flavor,
                                  xmin, xmax, nx, Q2, **kw)
@@ -1256,11 +1265,11 @@ class MomentAccumulationScanner:
             lhapdf.setVerbosity(1)
 
             win_str = '  '.join(
-                f"wm{k+1}:{ratio_window[k, lvl]:.3f}" for k in range(max_n))
+                f"wm{k+start_n}:{ratio_window[k, lvl]:.3f}" for k in range(n_levels))
             print(f"n={n}:  {win_str}")
 
             np.savez(results_path,
-                     max_n=max_n, x0=x0, w=w, weight=weight,
+                     max_n=max_n, start_n=start_n, x0=x0, w=w, weight=weight,
                      ratio_window=ratio_window,
                      ratio_charges=ratio_charges_buf,
                      ratio_poly_moments=ratio_poly_moments,
@@ -1275,9 +1284,9 @@ class MomentAccumulationScanner:
                      pdf_name=np.array(self._pdf_name),
                      mc2h_dir=np.array(self._mc2h_dir or ''))
 
-        self.n_values             = list(range(1, max_n + 1))
+        self.n_values             = list(range(start_n, max_n + 1))
         self.ratio_window         = ratio_window
-        self.ratio_charges        = ratio_charges_buf[:n_obs] if n_obs else np.empty((0, max_n))
+        self.ratio_charges        = ratio_charges_buf[:n_obs] if n_obs else np.empty((0, n_levels))
         self.ratio_poly_moments   = ratio_poly_moments
         self.sigma_before_window  = sigma_before_window
         self.sigma_before_charges = sigma_before_charges
@@ -1300,11 +1309,12 @@ class MomentAccumulationScanner:
             raise FileNotFoundError(
                 f"No saved results at {results_path}. Call run() first.")
 
-        saved = np.load(results_path, allow_pickle=True)
-        max_n = int(saved['max_n'])
-        n_obs = len(saved['charge_labels'])
+        saved   = np.load(results_path, allow_pickle=True)
+        max_n   = int(saved['max_n'])
+        start_n = int(saved.get('start_n', 1))
+        n_obs   = len(saved['charge_labels'])
 
-        self.n_values             = list(range(1, max_n + 1))
+        self.n_values             = list(range(start_n, max_n + 1))
         self.ratio_window         = saved['ratio_window']
         self.ratio_charges        = saved['ratio_charges'][:n_obs]
         self.ratio_poly_moments   = saved['ratio_poly_moments']
@@ -1375,8 +1385,9 @@ class MomentAccumulationScanner:
 
         # Window moment panels
         for k in range(max_n):
-            sym = (rf'$g_{{{k+1}}}$' if weight == 'gaussian'
-                   else rf'$a_{{{k+1}}}$')
+            idx = n_vals[k]
+            sym = (rf'$g_{{{idx}}}$' if weight == 'gaussian'
+                   else rf'$a_{{{idx}}}$')
             if (self.sigma_before_window is not None and
                     self.central_window is not None and
                     abs(self.central_window[k]) > 0):
@@ -1434,6 +1445,175 @@ class MomentAccumulationScanner:
             print(f"Plot → {out}")
 
         return fig
+
+    # ------------------------------------------------------------------
+    @classmethod
+    def plot_compare(cls, scanners, labels=None, save=False, save_path=None):
+        """Class-level comparison plot — overlay results from multiple scanners.
+
+        Parameters
+        ----------
+        scanners : list[MomentAccumulationScanner]
+            Two or more loaded scanners (run() or load() must have been called).
+        labels : list[str], optional
+            One legend label per scanner.  Auto-generated if None.
+        save : bool
+            If True, write to first scanner's output_dir.
+        save_path : str, optional
+            Override save destination.
+
+        Returns
+        -------
+        matplotlib.figure.Figure
+
+        Examples
+        --------
+        >>> s1 = MomentAccumulationScanner('runcard_a.py').load()
+        >>> s2 = MomentAccumulationScanner('runcard_b.py').load()
+        >>> fig = MomentAccumulationScanner.plot_compare([s1, s2])
+        """
+        return plot_moment_accumulation_comparison(
+            scanners, labels=labels, colors=None,
+            save=save, save_path=save_path)
+
+    # ------------------------------------------------------------------
+    def plot_comparison(self, other, labels=None, colors=None,
+                        save=False, save_path=None):
+        """Compare this scanner's results against one or more others on the same axes.
+
+        Parameters
+        ----------
+        other : MomentAccumulationScanner or list[MomentAccumulationScanner]
+        labels, colors, save, save_path : forwarded to plot_moment_accumulation_comparison
+        """
+        scanners = [self] + (other if isinstance(other, list) else [other])
+        return plot_moment_accumulation_comparison(
+            scanners, labels=labels, colors=colors,
+            save=save, save_path=save_path)
+
+
+# ── Comparison plot (module-level) ─────────────────────────────────────────────
+
+def plot_moment_accumulation_comparison(scanners, labels=None, colors=None,
+                                        save=False, save_path=None):
+    """Overlay σ_after/σ_before curves from multiple MomentAccumulationScanner runs.
+
+    Parameters
+    ----------
+    scanners : list[MomentAccumulationScanner]
+        Two or more scanners with results loaded (via run() or load()).
+    labels : list[str] or None
+        Legend label for each scanner.  Defaults to each scanner's pdf_label/pdf.
+    colors : list or None
+        Matplotlib color specs, one per scanner.  Defaults to C0, C1, C2, …
+    save : bool
+        Save the figure.
+    save_path : str or None
+        File to save to.  Defaults to the first scanner's output_dir with name
+        moment_accumulation_comparison_<basename>.pdf.
+
+    Returns
+    -------
+    matplotlib.figure.Figure
+
+    Example (notebook)
+    ------------------
+    >>> from scan_window_moments import MomentAccumulationScanner
+    >>> s1 = MomentAccumulationScanner('runcard_a.py').load()
+    >>> s2 = MomentAccumulationScanner('runcard_b.py').load()
+    >>> fig = s1.plot_comparison(s2, labels=['CT18NNLO', 'MSHT20'])
+    """
+    import matplotlib.pyplot as plt
+
+    if not scanners:
+        raise ValueError("scanners list is empty")
+    for i, s in enumerate(scanners):
+        if s.ratio_window is None:
+            raise RuntimeError(
+                f"Scanner {i} has no results — call run() or load() first.")
+
+    if labels is None:
+        labels = [s.cfg.get('pdf_label', s.cfg.get('pdf', f'run {i}'))
+                  for i, s in enumerate(scanners)]
+    if colors is None:
+        colors = [f'C{i}' for i in range(len(scanners))]
+
+    ref    = scanners[0]
+    cfg    = ref.cfg
+    ms_cfg = cfg['moment_scan']
+    weight = ms_cfg.get('weight', 'gaussian')
+    x0     = ms_cfg['x0']
+    w      = ms_cfg['w']
+    max_n  = len(ref.n_values)
+    n_obs  = ref.ratio_charges.shape[0]
+    n_orders = ref.ratio_poly_moments.shape[0]
+    n_panels = max_n + n_obs + n_orders
+
+    ncols = min(n_panels, 4)
+    nrows = (n_panels + ncols - 1) // ncols
+    fig, axes = plt.subplots(nrows, ncols,
+                             figsize=(4 * ncols, 3.5 * nrows),
+                             squeeze=False)
+    axes_flat = axes.flatten()
+    panel = 0
+
+    def _draw_multi(ax, ydatas, title):
+        for s, ydata, color, label in zip(scanners, ydatas, colors, labels):
+            if ydata is None:
+                continue
+            ax.plot(s.n_values, ydata, 'o-', color=color, label=label)
+        ax.axhline(1.0, color='gray', ls='--', lw=0.8)
+        ax.set_ylim(0, 1.1)
+        all_n = sorted({v for s in scanners for v in s.n_values})
+        ax.set_xticks(all_n)
+        ax.set_xlabel('Moments constrained')
+        ax.set_ylabel(r'$\sigma_{\rm after}/\sigma_{\rm before}$')
+        ax.set_title(title)
+        ax.legend(fontsize=7)
+
+    for k in range(max_n):
+        idx = ref.n_values[k]
+        sym = (rf'$g_{{{idx}}}$' if weight == 'gaussian'
+               else rf'$a_{{{idx}}}$')
+        _draw_multi(axes_flat[panel],
+                    [s.ratio_window[k] if k < s.ratio_window.shape[0] else None
+                     for s in scanners],
+                    rf"Window {sym}")
+        panel += 1
+
+    for obs_idx in range(n_obs):
+        lbl = ref.charge_labels[obs_idx] if ref.charge_labels else f"obs {obs_idx}"
+        _draw_multi(axes_flat[panel],
+                    [s.ratio_charges[obs_idx] for s in scanners],
+                    lbl)
+        panel += 1
+
+    for ni in range(n_orders):
+        _draw_multi(axes_flat[panel],
+                    [s.ratio_poly_moments[ni] for s in scanners],
+                    rf'Full $n={ni}$')
+        panel += 1
+
+    for k in range(panel, len(axes_flat)):
+        axes_flat[k].set_visible(False)
+
+    fig.suptitle(
+        f"{' vs '.join(labels)} — Moment accumulation  ({cfg['flavor']})\n"
+        f"{weight}  $x_0={x0}$  $w={w}$    $Q^2={cfg['Q2']}$ GeV$^2$",
+        fontsize=12,
+    )
+    plt.tight_layout()
+
+    if save:
+        if save_path is None:
+            suffix = '_' + os.path.basename(os.path.abspath(cfg['output_dir']))
+            save_path = os.path.join(
+                os.path.abspath(cfg['output_dir']),
+                f"moment_accumulation_comparison{suffix}.pdf")
+        fig.savefig(save_path, dpi=150)
+        print(f"Plot → {save_path}")
+
+    return fig
 
 
 # ── Terminal entry point ───────────────────────────────────────────────────────

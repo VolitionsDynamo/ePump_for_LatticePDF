@@ -27,8 +27,9 @@ cfg = {
         "rel_unc": 0.10,        # fractional pseudo-data uncertainty on each moment
 
         # corr: None → measurements are uncorrelated (stat error only).
-        # To encode correlated uncertainties supply a max_n × max_n correlation
-        # matrix as a nested list; the diagonal must be 1.  Example for max_n=3:
+        # To encode correlated uncertainties supply an n_levels × n_levels
+        # correlation matrix (n_levels = max_n - start_n + 1); diagonal = 1.
+        # Example for n_levels=3:
         #
         # "corr": [
         #     [1.00, 0.50, 0.30],
@@ -36,6 +37,12 @@ cfg = {
         #     [0.30, 0.50, 1.00],
         # ],
         "corr":    None,
+
+        # start_n: index of the first moment to constrain.
+        #   None (default) → auto: 0 for weight='1' (a_0 = tensor charge is valid),
+        #                          1 for weight='gaussian' (g_0 = 0, undefined).
+        #   Set explicitly to override, e.g. start_n=1 to skip a_0 for flat weight.
+        "start_n": None,
     },
 
     # ── Full-moment integration (tracked after profiling) ─────────────────────
