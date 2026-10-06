@@ -548,15 +548,22 @@ def generate_theory_file(filepath, pdf_members, measurements, args):
                 )
             Ms[i, j] = val
             
+    # ePump theory file format: Ncol=1 (one theory-value column per row, no
+    # leading info columns).  For each PDF member block there are Na = n_obs
+    # rows — one per observable — each on its own line.  This is true for any
+    # number of observables; the "Na[k]" loop in ReadIn.C reads one getline per
+    # observable.  Writing all values on a single line (and using Ncol=n_obs)
+    # only works accidentally when n_obs=1 and breaks for n_obs>1 because ePump
+    # then tries to parse the next "PDF_i_Set" header as a number.
     with open(filepath, "w") as f:
         f.write("*\n*\n*\n")
         f.write("Theory column\n")
-        f.write(f"{n_obs}\n")
+        f.write("1\n")                   # Ncol = 1: zero info columns, one theory value
         for i in range(n_members):
             f.write(f"PDF_{i}_Set\n")
-            formatted_row = "".join(f"{Ms[i, j]:12.6f}" for j in range(n_obs))
-            f.write(formatted_row + "\n")
-            
+            for j in range(n_obs):       # one row per observable
+                f.write(f"    {Ms[i, j]:12.6f}\n")
+
     return Ms
 
 def generate_data_file(filepath, measurements):
