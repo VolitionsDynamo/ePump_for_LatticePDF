@@ -1540,14 +1540,9 @@ def plot_moment_accumulation_comparison(scanners, labels=None, colors=None,
 
     ref    = scanners[0]
     cfg    = ref.cfg
-    ms_cfg = cfg['moment_scan']
-    weight = ms_cfg.get('weight', 'gaussian')
-    x0     = ms_cfg['x0']
-    w      = ms_cfg['w']
-    max_n  = len(ref.n_values)
     n_obs  = ref.ratio_charges.shape[0]
     n_orders = ref.ratio_poly_moments.shape[0]
-    n_panels = max_n + n_obs + n_orders
+    n_panels = n_obs + n_orders
 
     ncols = min(n_panels, 4)
     nrows = (n_panels + ncols - 1) // ncols
@@ -1571,16 +1566,6 @@ def plot_moment_accumulation_comparison(scanners, labels=None, colors=None,
         ax.set_title(title)
         ax.legend(fontsize=7)
 
-    for k in range(max_n):
-        idx = ref.n_values[k]
-        sym = (rf'$g_{{{idx}}}$' if weight == 'gaussian'
-               else rf'$a_{{{idx}}}$')
-        _draw_multi(axes_flat[panel],
-                    [s.ratio_window[k] if k < s.ratio_window.shape[0] else None
-                     for s in scanners],
-                    rf"Window {sym}")
-        panel += 1
-
     for obs_idx in range(n_obs):
         lbl = ref.charge_labels[obs_idx] if ref.charge_labels else f"obs {obs_idx}"
         _draw_multi(axes_flat[panel],
@@ -1598,8 +1583,8 @@ def plot_moment_accumulation_comparison(scanners, labels=None, colors=None,
         axes_flat[k].set_visible(False)
 
     fig.suptitle(
-        f"{' vs '.join(labels)} — Moment accumulation  ({cfg['flavor']})\n"
-        f"{weight}  $x_0={x0}$  $w={w}$    $Q^2={cfg['Q2']}$ GeV$^2$",
+        f"{' vs '.join(labels)} — Moment accumulation ({cfg['flavor']})  "
+        f"$Q^2={cfg['Q2']}$ GeV$^2$",
         fontsize=12,
     )
     plt.tight_layout()
