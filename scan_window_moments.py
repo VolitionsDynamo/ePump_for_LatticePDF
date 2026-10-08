@@ -1034,6 +1034,9 @@ class AnchoredWindowScanner:
         self.ratio_poly_moments   = None   # (4, n_midpoints)
         self.sigma_before_poly    = None   # (4,)
 
+        self.anchor_ratio_charges = None   # (n_obs,) — anchor-only σ_after/σ_before
+        self.anchor_ratio_poly    = None   # (4,)     — anchor-only σ_after/σ_before
+
         self._pdf_name = None
         self._mc2h_dir = None
 
@@ -1176,6 +1179,69 @@ class AnchoredWindowScanner:
             unc = base_set.uncertainty(vals)
             sigma_before_poly[ni] = (unc.errminus + unc.errplus) / 2.0
 
+        # --- anchor-only profiling (reference reduction without second window) ---
+        anc_label    = f"anc_{ax0:.4f}_only"
+        anc_run_name = os.path.join(output_dir, anc_label, anc_label)
+        anc_run_dir  = os.path.join(output_dir, anc_label)
+
+        anc_cached = False
+        if not force and os.path.exists(results_path):
+            _saved = np.load(results_path, allow_pickle=True)
+            if 'anchor_ratio_charges' in _saved and 'anchor_ratio_poly' in _saved:
+                anchor_ratio_ch       = _saved['anchor_ratio_charges']
+                anchor_ratio_poly_anc = _saved['anchor_ratio_poly']
+                anc_cached = True
+                print("Anchor-only reference loaded from cache.")
+
+        if not anc_cached:
+            if os.path.isdir(os.path.join(anc_run_dir, anc_label)):
+                if anc_run_dir not in lhapdf.paths():
+                    lhapdf.setPaths([anc_run_dir] + lhapdf.paths())
+                anc_profiled_set = lhapdf.getPDFSet(anc_label)
+            else:
+                ep_anc = EProfiler(pdf_name, anc_run_name, epump_path=epump_path,
+                                   lhapdf_path=mc2h_dir)
+                ep_anc.pdf_set     = base_set
+                ep_anc.pdf_members = base_members
+                ep_anc.add_measurement(
+                    x=ax0, Q2=Q2, value=anchor_val, stat=anchor_stat,
+                    obs_type='moment', flavor=flavor,
+                    xmin=axmin, xmax=axmax, nx=nx,
+                    weight=weight, moment=moment,
+                )
+                ep_anc.generate_files()
+                _check_theory_file_format(f"{anc_run_name}.theory", n_obs=1)
+                ep_anc.run()
+                anc_profiled_set = ep_anc.profiled_set
+
+            anchor_ratio_ch       = np.full(max(n_obs, 1), np.nan)
+            anchor_ratio_poly_anc = np.full(n_orders, np.nan)
+
+            for obs_idx, obs in enumerate(charge_obs):
+                obs_terms = parse_flavor_expression(obs['flavor'])
+                kw = dict(weight_type=obs['weight'], moment=int(obs['moment']))
+                lhapdf.setVerbosity(0)
+                pv = [compute_integrated_moment(anc_profiled_set.mkPDF(k), obs_terms,
+                                                charge_xmin, charge_xmax, nx, Q2, **kw)
+                      for k in range(anc_profiled_set.size)]
+                lhapdf.setVerbosity(1)
+                unc = anc_profiled_set.uncertainty(pv)
+                anchor_ratio_ch[obs_idx] = ((unc.errminus + unc.errplus) / 2.0 /
+                                             sigma_before_ch[obs_idx])
+
+            for ni in range(n_orders):
+                kw = dict(weight_type='1', moment=ni)
+                lhapdf.setVerbosity(0)
+                pv = [compute_integrated_moment(anc_profiled_set.mkPDF(k), poly_terms,
+                                                moment_xmin, moment_xmax, nx, Q2, **kw)
+                      for k in range(anc_profiled_set.size)]
+                lhapdf.setVerbosity(1)
+                unc = anc_profiled_set.uncertainty(pv)
+                anchor_ratio_poly_anc[ni] = ((unc.errminus + unc.errplus) / 2.0 /
+                                              sigma_before_poly[ni])
+            print(f"Anchor-only ratios (charges): {anchor_ratio_ch[:n_obs]}")
+            print(f"Anchor-only ratios (poly):    {anchor_ratio_poly_anc}")
+
         theory_checked = False
 
         for i, x0 in enumerate(midpoints):
@@ -1297,6 +1363,8 @@ class AnchoredWindowScanner:
                      charge_labels=np.array([o['label'] for o in charge_obs]),
                      ratio_poly_moments=ratio_poly_buf,
                      sigma_before_poly=sigma_before_poly,
+                     anchor_ratio_charges=anchor_ratio_ch,
+                     anchor_ratio_poly=anchor_ratio_poly_anc,
                      anchor_x0=np.array(ax0), anchor_w=np.array(w),
                      pdf_name=np.array(self._pdf_name),
                      mc2h_dir=np.array(self._mc2h_dir or ''))
@@ -1311,6 +1379,8 @@ class AnchoredWindowScanner:
         self.charge_labels        = [o['label'] for o in charge_obs]
         self.ratio_poly_moments   = ratio_poly_buf
         self.sigma_before_poly    = sigma_before_poly
+        self.anchor_ratio_charges = anchor_ratio_ch[:n_obs] if n_obs else np.empty(0)
+        self.anchor_ratio_poly    = anchor_ratio_poly_anc
         print(f"Results saved → {results_path}")
         return self
 
@@ -1334,6 +1404,8 @@ class AnchoredWindowScanner:
                                      if 'charge_labels' in data else [])
         self.ratio_poly_moments   = data['ratio_poly_moments']   if 'ratio_poly_moments'   in data else None
         self.sigma_before_poly    = data['sigma_before_poly']    if 'sigma_before_poly'    in data else None
+        self.anchor_ratio_charges = data['anchor_ratio_charges'] if 'anchor_ratio_charges' in data else None
+        self.anchor_ratio_poly    = data['anchor_ratio_poly']    if 'anchor_ratio_poly'    in data else None
         print(f"Results loaded ← {results_path}")
         return self
 
@@ -1376,11 +1448,14 @@ class AnchoredWindowScanner:
                        self.ratio_charges.shape[0] > 0)
         has_poly    = self.ratio_poly_moments is not None
 
-        def _draw_panel(ax, ydata, title):
-            ax.plot(x[mask], ydata[mask], 'o-', color='C0')
+        def _draw_panel(ax, ydata, title, anchor_ref=None):
+            ax.plot(x[mask], ydata[mask], 'o-', color='C0', label='anchor + scan')
             ax.axhline(1.0, color='gray', ls='--', lw=0.8)
             ax.axvline(ax0, color='C1', ls=':', lw=1.2)
             ax.axvspan(max(0, ax0 - w), min(1, ax0 + w), alpha=0.08, color='C1')
+            if anchor_ref is not None and np.isfinite(anchor_ref):
+                ax.axhline(anchor_ref, color='C3', ls='--', lw=1.0, label='anchor only')
+                ax.legend(fontsize=7, loc='upper right')
             ax.set_xlim(xlo, xhi)
             ax.set_ylim(0, 1.1)
             ax.set_xlabel('$x_0$')
@@ -1405,13 +1480,20 @@ class AnchoredWindowScanner:
             if has_charges:
                 labels = self.charge_labels or [f'obs {k}' for k in range(n_charge_panels)]
                 for k in range(n_charge_panels):
-                    _draw_panel(axes_flat[panel], self.ratio_charges[k], labels[k])
+                    anc_ref = (float(self.anchor_ratio_charges[k])
+                               if self.anchor_ratio_charges is not None
+                               and k < len(self.anchor_ratio_charges)
+                               else None)
+                    _draw_panel(axes_flat[panel], self.ratio_charges[k], labels[k],
+                                anchor_ref=anc_ref)
                     panel += 1
 
             if has_poly:
                 for ni in range(n_poly_panels):
+                    anc_ref = (float(self.anchor_ratio_poly[ni])
+                               if self.anchor_ratio_poly is not None else None)
                     _draw_panel(axes_flat[panel], self.ratio_poly_moments[ni],
-                                rf'Full $n={ni}$')
+                                rf'Full $n={ni}$', anchor_ref=anc_ref)
                     panel += 1
 
             for k in range(panel, len(axes_flat)):
