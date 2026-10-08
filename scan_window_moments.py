@@ -35,7 +35,12 @@ from e_profiler import (
 
 
 def load_runcard(path):
-    spec = importlib.util.spec_from_file_location("runcard", os.path.abspath(path))
+    p = str(path)
+    if not os.path.exists(p) and not p.endswith('.py'):
+        p = p + '.py'
+    spec = importlib.util.spec_from_file_location("runcard", os.path.abspath(p))
+    if spec is None:
+        raise FileNotFoundError(f"Runcard not found: {path!r}")
     mod = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(mod)
     return mod.cfg
@@ -1023,6 +1028,12 @@ class AnchoredWindowScanner:
         self.sigma_before = None   # 1D ndarray: base PDF σ per midpoint
         self.central_vals = None   # 1D ndarray: central moment value per midpoint
 
+        self.ratio_charges        = None   # (n_obs, n_midpoints)
+        self.sigma_before_charges = None   # (n_obs,)
+        self.charge_labels        = None   # list[str]
+        self.ratio_poly_moments   = None   # (4, n_midpoints)
+        self.sigma_before_poly    = None   # (4,)
+
         self._pdf_name = None
         self._mc2h_dir = None
 
@@ -1086,13 +1097,25 @@ class AnchoredWindowScanner:
         pdf_name   = self._pdf_name
         mc2h_dir   = self._mc2h_dir
 
+        charge_obs  = cfg.get('charge_observables', [])
+        n_obs       = len(charge_obs)
+        charge_xmin = float(cfg.get('charge_xmin', 1e-4))
+        charge_xmax = float(cfg.get('charge_xmax', 0.999))
+        n_orders    = 4
+        moment_xmin = float(cfg.get('moment_xmin', 1e-4))
+        moment_xmax = float(cfg.get('moment_xmax', 0.999))
+
         midpoints = sorted(float(x) for x in cfg['scan_midpoints'])
         n         = len(midpoints)
 
-        ratio        = np.full(n, np.nan)
-        boundary     = np.zeros(n, dtype=bool)
-        sigma_before = np.full(n, np.nan)
-        central_vals = np.full(n, np.nan)
+        ratio             = np.full(n, np.nan)
+        boundary          = np.zeros(n, dtype=bool)
+        sigma_before      = np.full(n, np.nan)
+        central_vals      = np.full(n, np.nan)
+        ratio_charges_buf = np.full((max(n_obs, 1), n), np.nan)
+        sigma_before_ch   = np.full(max(n_obs, 1), np.nan)
+        ratio_poly_buf    = np.full((n_orders, n), np.nan)
+        sigma_before_poly = np.full(n_orders, np.nan)
 
         results_path = os.path.join(output_dir, 'results_anchored.npz')
         if not force and os.path.exists(results_path):
@@ -1104,11 +1127,16 @@ class AnchoredWindowScanner:
                     sigma_before[...] = saved['sigma_before']
                 if 'central_vals' in saved:
                     central_vals[...] = saved['central_vals']
+                if 'ratio_charges' in saved and saved['ratio_charges'].shape == ratio_charges_buf.shape:
+                    ratio_charges_buf[...] = saved['ratio_charges']
+                if 'ratio_poly_moments' in saved:
+                    ratio_poly_buf[...] = saved['ratio_poly_moments']
                 n_done = int(np.sum(np.isfinite(ratio)))
                 if n_done:
                     print(f"Resuming: {n_done}/{n} cells already done.")
 
         parsed_terms = parse_flavor_expression(flavor)
+        poly_terms   = parse_flavor_expression(flavor)
         base_set     = lhapdf.getPDFSet(pdf_name)
         base_central = base_set.mkPDF(0)
         base_members = base_set.mkPDFs()
@@ -1122,15 +1150,31 @@ class AnchoredWindowScanner:
         )
         anchor_stat = rel_unc * abs(anchor_val)
 
-        # Compute σ_before on the ANCHOR observable (used once for reporting)
         orig_anchor_vals = [
             compute_integrated_moment(m, parsed_terms, axmin, axmax, nx, Q2,
                                       weight_type=weight, moment=moment)
             for m in base_members
         ]
-        sigma_before_anchor = (base_set.uncertainty(orig_anchor_vals).errminus +
-                               base_set.uncertainty(orig_anchor_vals).errplus) / 2.0
+        unc_anc = base_set.uncertainty(orig_anchor_vals)
+        sigma_before_anchor = (unc_anc.errminus + unc_anc.errplus) / 2.0
         print(f"Anchor: x0={ax0}, w={w}  |  val={anchor_val:.5g}  σ_before={sigma_before_anchor:.5g}")
+
+        # σ_before for charge observables (computed once from base PDF)
+        for obs_idx, obs in enumerate(charge_obs):
+            obs_terms = parse_flavor_expression(obs['flavor'])
+            kw = dict(weight_type=obs['weight'], moment=int(obs['moment']))
+            vals = [compute_integrated_moment(m, obs_terms, charge_xmin, charge_xmax,
+                                              nx, Q2, **kw) for m in base_members]
+            unc = base_set.uncertainty(vals)
+            sigma_before_ch[obs_idx] = (unc.errminus + unc.errplus) / 2.0
+
+        # σ_before for polynomial moments (computed once from base PDF)
+        for ni in range(n_orders):
+            kw = dict(weight_type='1', moment=ni)
+            vals = [compute_integrated_moment(m, poly_terms, moment_xmin, moment_xmax,
+                                              nx, Q2, **kw) for m in base_members]
+            unc = base_set.uncertainty(vals)
+            sigma_before_poly[ni] = (unc.errminus + unc.errplus) / 2.0
 
         theory_checked = False
 
@@ -1140,7 +1184,11 @@ class AnchoredWindowScanner:
                 print(f"({i+1}/{n}) [x0={x0:.4f}]  ← overlaps anchor — skipped")
                 continue
 
-            if np.isfinite(ratio[i]) and not force:
+            # Skip only if ratio AND charges AND moments are all computed
+            cell_done = (np.isfinite(ratio[i]) and
+                         (n_obs == 0 or np.all(np.isfinite(ratio_charges_buf[:n_obs, i]))) and
+                         np.all(np.isfinite(ratio_poly_buf[:, i])))
+            if cell_done and not force:
                 print(f"({i+1}/{n}) [x0={x0:.4f}]  ← already done")
                 continue
 
@@ -1213,21 +1261,56 @@ class AnchoredWindowScanner:
             sigma_before[i] = sigma_b
             central_vals[i] = central_val
 
+            # Evaluate tensor charges
+            for obs_idx, obs in enumerate(charge_obs):
+                obs_terms = parse_flavor_expression(obs['flavor'])
+                kw = dict(weight_type=obs['weight'], moment=int(obs['moment']))
+                lhapdf.setVerbosity(0)
+                pv = [compute_integrated_moment(profiled_set.mkPDF(k), obs_terms,
+                                                charge_xmin, charge_xmax, nx, Q2, **kw)
+                      for k in range(profiled_set.size)]
+                lhapdf.setVerbosity(1)
+                unc = profiled_set.uncertainty(pv)
+                ratio_charges_buf[obs_idx, i] = ((unc.errminus + unc.errplus) / 2.0 /
+                                                  sigma_before_ch[obs_idx])
+
+            # Evaluate polynomial moments (n = 0 … n_orders-1)
+            for ni in range(n_orders):
+                kw = dict(weight_type='1', moment=ni)
+                lhapdf.setVerbosity(0)
+                pv = [compute_integrated_moment(profiled_set.mkPDF(k), poly_terms,
+                                                moment_xmin, moment_xmax, nx, Q2, **kw)
+                      for k in range(profiled_set.size)]
+                lhapdf.setVerbosity(1)
+                unc = profiled_set.uncertainty(pv)
+                ratio_poly_buf[ni, i] = ((unc.errminus + unc.errplus) / 2.0 /
+                                          sigma_before_poly[ni])
+
             clip_tag = "  [BOUNDARY-CLIPPED]" if clipped else ""
             print(f"({i+1}/{n}) [x0={x0:.4f}]  → ratio={r:.4f}  "
                   f"σ_before={sigma_b:.5g}  σ_after={sigma_a:.5g}{clip_tag}")
             np.savez(results_path,
                      midpoints=midpoints, ratio=ratio, boundary=boundary,
                      sigma_before=sigma_before, central_vals=central_vals,
+                     ratio_charges=ratio_charges_buf,
+                     sigma_before_charges=sigma_before_ch,
+                     charge_labels=np.array([o['label'] for o in charge_obs]),
+                     ratio_poly_moments=ratio_poly_buf,
+                     sigma_before_poly=sigma_before_poly,
                      anchor_x0=np.array(ax0), anchor_w=np.array(w),
                      pdf_name=np.array(self._pdf_name),
                      mc2h_dir=np.array(self._mc2h_dir or ''))
 
-        self.midpoints    = midpoints
-        self.ratio        = ratio
-        self.boundary     = boundary
-        self.sigma_before = sigma_before
-        self.central_vals = central_vals
+        self.midpoints            = midpoints
+        self.ratio                = ratio
+        self.boundary             = boundary
+        self.sigma_before         = sigma_before
+        self.central_vals         = central_vals
+        self.ratio_charges        = ratio_charges_buf[:n_obs] if n_obs else np.empty((0, n))
+        self.sigma_before_charges = sigma_before_ch[:n_obs]
+        self.charge_labels        = [o['label'] for o in charge_obs]
+        self.ratio_poly_moments   = ratio_poly_buf
+        self.sigma_before_poly    = sigma_before_poly
         print(f"Results saved → {results_path}")
         return self
 
@@ -1240,17 +1323,27 @@ class AnchoredWindowScanner:
             raise FileNotFoundError(
                 f"No saved results at {results_path}. Call run() first.")
         data = np.load(results_path, allow_pickle=True)
-        self.midpoints    = data['midpoints'].tolist()
-        self.ratio        = data['ratio']
-        self.boundary     = data['boundary']
-        self.sigma_before = data['sigma_before'] if 'sigma_before' in data else None
-        self.central_vals = data['central_vals'] if 'central_vals' in data else None
+        self.midpoints            = data['midpoints'].tolist()
+        self.ratio                = data['ratio']
+        self.boundary             = data['boundary']
+        self.sigma_before         = data['sigma_before']         if 'sigma_before'         in data else None
+        self.central_vals         = data['central_vals']         if 'central_vals'         in data else None
+        self.ratio_charges        = data['ratio_charges']        if 'ratio_charges'        in data else None
+        self.sigma_before_charges = data['sigma_before_charges'] if 'sigma_before_charges' in data else None
+        self.charge_labels        = (data['charge_labels'].tolist()
+                                     if 'charge_labels' in data else [])
+        self.ratio_poly_moments   = data['ratio_poly_moments']   if 'ratio_poly_moments'   in data else None
+        self.sigma_before_poly    = data['sigma_before_poly']    if 'sigma_before_poly'    in data else None
         print(f"Results loaded ← {results_path}")
         return self
 
     # ------------------------------------------------------------------
     def plot(self, save=True):
-        """Plot σ_after/σ_before vs scan midpoint.
+        """Multi-panel plot of σ_after/σ_before vs scan midpoint.
+
+        One panel per tensor-charge observable and polynomial moment order.
+        Falls back to a single window-moment panel if charges/moments were not
+        computed (old results file).
 
         Parameters
         ----------
@@ -1274,34 +1367,61 @@ class AnchoredWindowScanner:
         obs_label = rf'$g_{{{moment}}}$' if weight == 'gaussian' else rf'$a_{{{moment}}}$'
         pdf_label = cfg.get('pdf_label', cfg['pdf'])
 
-        x     = np.array(self.midpoints)
-        ratio = np.array(self.ratio)
+        x        = np.array(self.midpoints)
+        mask     = ~np.asarray(self.boundary) & np.isfinite(self.ratio)
+        xlo      = max(0.0, min(x) - w / 2)
+        xhi      = min(1.0, max(x) + w / 2)
 
-        fig, ax = plt.subplots(figsize=(9, 4))
+        has_charges = (self.ratio_charges is not None and
+                       self.ratio_charges.shape[0] > 0)
+        has_poly    = self.ratio_poly_moments is not None
 
-        mask = ~self.boundary & np.isfinite(ratio)
-        ax.plot(x[mask], ratio[mask], 'o-', color='C0')
+        def _draw_panel(ax, ydata, title):
+            ax.plot(x[mask], ydata[mask], 'o-', color='C0')
+            ax.axhline(1.0, color='gray', ls='--', lw=0.8)
+            ax.axvline(ax0, color='C1', ls=':', lw=1.2)
+            ax.axvspan(max(0, ax0 - w), min(1, ax0 + w), alpha=0.08, color='C1')
+            ax.set_xlim(xlo, xhi)
+            ax.set_ylim(0, 1.1)
+            ax.set_xlabel('$x_0$')
+            ax.set_ylabel(r'$\sigma_{\rm after}/\sigma_{\rm before}$')
+            ax.set_title(title, fontsize=9)
 
-        if np.any(self.boundary):
-            ax.scatter(x[self.boundary], np.full(np.sum(self.boundary), 1.05),
-                       marker='x', s=50, color='lightgray', zorder=3,
-                       label='overlap (skipped)')
-            ax.legend(fontsize=8)
+        if not has_charges and not has_poly:
+            fig, ax = plt.subplots(figsize=(8, 4))
+            _draw_panel(ax, self.ratio, f'Window {obs_label}')
+        else:
+            n_charge_panels = self.ratio_charges.shape[0] if has_charges else 0
+            n_poly_panels   = self.ratio_poly_moments.shape[0] if has_poly else 0
+            n_panels        = n_charge_panels + n_poly_panels
+            ncols = min(n_panels, 4)
+            nrows = (n_panels + ncols - 1) // ncols
+            fig, axes = plt.subplots(nrows, ncols,
+                                     figsize=(4 * ncols, 3.5 * nrows),
+                                     squeeze=False)
+            axes_flat = axes.flatten()
+            panel = 0
 
-        ax.axhline(1.0, color='gray', ls='--', lw=0.8)
-        ax.axvline(ax0, color='C1', ls=':', lw=1.5,
-                   label=f'anchor $x_0={ax0}$, $w={w}$')
-        # shade the anchor window
-        ax.axvspan(ax0 - w, ax0 + w, alpha=0.08, color='C1')
+            if has_charges:
+                labels = self.charge_labels or [f'obs {k}' for k in range(n_charge_panels)]
+                for k in range(n_charge_panels):
+                    _draw_panel(axes_flat[panel], self.ratio_charges[k], labels[k])
+                    panel += 1
 
-        ax.set_ylim(0, 1.1)
-        ax.set_xlabel('Scan window midpoint  $x_0$')
-        ax.set_ylabel(r'$\sigma_{\rm after}\ /\ \sigma_{\rm before}$')
+            if has_poly:
+                for ni in range(n_poly_panels):
+                    _draw_panel(axes_flat[panel], self.ratio_poly_moments[ni],
+                                rf'Full $n={ni}$')
+                    panel += 1
+
+            for k in range(panel, len(axes_flat)):
+                axes_flat[k].set_visible(False)
+
         fig.suptitle(
-            f"{pdf_label} — Anchored window scan\n"
-            f"Anchor: $x_0={ax0}$, $w={w}$    {obs_label}    "
-            f"$Q^2={cfg['Q2']}$ GeV$^2$    {cfg['flavor']}",
-            fontsize=12,
+            f"{pdf_label} — Anchored window scan    {obs_label}    "
+            f"$Q^2={cfg['Q2']}$ GeV$^2$    {cfg['flavor']}\n"
+            f"Anchor: $x_0={ax0}$, $w={w}$",
+            fontsize=11,
         )
         plt.tight_layout()
 
