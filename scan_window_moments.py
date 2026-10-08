@@ -1398,7 +1398,7 @@ class AnchoredWindowScanner:
             nrows = (n_panels + ncols - 1) // ncols
             fig, axes = plt.subplots(nrows, ncols,
                                      figsize=(4 * ncols, 3.5 * nrows),
-                                     squeeze=False)
+                                     squeeze=False, sharey=True)
             axes_flat = axes.flatten()
             panel = 0
 
@@ -1417,6 +1417,11 @@ class AnchoredWindowScanner:
             for k in range(panel, len(axes_flat)):
                 axes_flat[k].set_visible(False)
 
+            for r in range(nrows):
+                for c in range(1, ncols):
+                    axes[r, c].tick_params(labelleft=False)
+                    axes[r, c].set_ylabel('')
+
         fig.suptitle(
             f"{pdf_label} — Anchored window scan    {obs_label}    "
             f"$Q^2={cfg['Q2']}$ GeV$^2$    {cfg['flavor']}\n"
@@ -1424,6 +1429,7 @@ class AnchoredWindowScanner:
             fontsize=11,
         )
         plt.tight_layout()
+        plt.subplots_adjust(wspace=0)
 
         if save:
             suffix = '_' + os.path.basename(os.path.abspath(cfg['output_dir']))
@@ -1840,7 +1846,7 @@ class MomentAccumulationScanner:
         nrows = (n_panels + ncols - 1) // ncols
         fig, axes = plt.subplots(nrows, ncols,
                                  figsize=(4 * ncols, 3.5 * nrows),
-                                 squeeze=False)
+                                 squeeze=False, sharey=True)
         axes_flat = axes.flatten()
         panel     = 0
 
@@ -1899,6 +1905,11 @@ class MomentAccumulationScanner:
         for k in range(panel, len(axes_flat)):
             axes_flat[k].set_visible(False)
 
+        for r in range(nrows):
+            for c in range(1, ncols):
+                axes[r, c].tick_params(labelleft=False)
+                axes[r, c].set_ylabel('')
+
         pdf_label = cfg.get('pdf_label', cfg['pdf'])
         fig.suptitle(
             f"{pdf_label} — Moment accumulation  ({cfg['flavor']})\n"
@@ -1906,6 +1917,7 @@ class MomentAccumulationScanner:
             fontsize=12,
         )
         plt.tight_layout()
+        plt.subplots_adjust(wspace=0)
 
         if save:
             suffix = '_' + os.path.basename(os.path.abspath(cfg['output_dir']))
@@ -2018,7 +2030,7 @@ def plot_moment_accumulation_comparison(scanners, labels=None, colors=None,
     nrows = (n_panels + ncols - 1) // ncols
     fig, axes = plt.subplots(nrows, ncols,
                              figsize=(4 * ncols, 3.5 * nrows),
-                             squeeze=False)
+                             squeeze=False, sharey=True)
     axes_flat = axes.flatten()
     panel = 0
 
@@ -2052,12 +2064,18 @@ def plot_moment_accumulation_comparison(scanners, labels=None, colors=None,
     for k in range(panel, len(axes_flat)):
         axes_flat[k].set_visible(False)
 
+    for r in range(nrows):
+        for c in range(1, ncols):
+            axes[r, c].tick_params(labelleft=False)
+            axes[r, c].set_ylabel('')
+
     fig.suptitle(
         f"{' vs '.join(labels)} — Moment accumulation ({cfg['flavor']})  "
         f"$Q^2={cfg['Q2']}$ GeV$^2$",
         fontsize=12,
     )
     plt.tight_layout()
+    plt.subplots_adjust(wspace=0)
 
     if save:
         if save_path is None:
