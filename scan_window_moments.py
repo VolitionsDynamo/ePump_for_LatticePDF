@@ -54,6 +54,28 @@ def _bin_edges(arr):
     ])
 
 
+def _check_theory_file_format(theory_path, n_obs):
+    """Assert that a theory file has Ncol=1 with one row per observable per member block.
+
+    Raises AssertionError if the format is wrong (catches the multi-obs bug where
+    all values were written on one line per member instead of one line each).
+    """
+    with open(theory_path) as f:
+        lines = [l.strip() for l in f if l.strip()]
+    for i, line in enumerate(lines):
+        if line.startswith("PDF_0_Set"):
+            for k in range(n_obs):
+                val_line = lines[i + 1 + k]
+                n_tokens = len(val_line.split())
+                assert n_tokens == 1, (
+                    f"Theory file format error at obs {k}: expected 1 value per line, "
+                    f"got {n_tokens}. Line: {val_line!r}\n"
+                    f"  File: {theory_path}")
+            print(f"Theory file OK: {n_obs} obs/member, one row each  ({theory_path})")
+            return
+    print(f"Warning: PDF_0_Set marker not found in {theory_path} — format check skipped.")
+
+
 class WindowMomentScanner:
     """
     2D scan of Gaussian window moment constraints via ePump profiling.
@@ -961,6 +983,334 @@ class WindowMomentScanner:
             )
             fig.savefig(out, dpi=150)
             print(f"Charge heat map → {out}")
+
+        return fig
+
+
+class AnchoredWindowScanner:
+    """
+    1D scan over window midpoints with a fixed anchor measurement.
+
+    Each cell profiles from the base PDF using two simultaneous ePump measurements:
+    (1) the fixed anchor window and (2) the current scan midpoint (same width).
+    Midpoints that overlap the anchor window are automatically skipped.
+
+    Ratios σ_after/σ_before use the base PDF as the denominator, directly
+    comparable to WindowMomentScanner results for the same cells.
+
+    Parameters
+    ----------
+    cfg : dict or str
+        Configuration dict, or path to a runcard.py file that defines ``cfg``.
+        Required keys beyond the shared PDF/flavor/Q2/nx/moment/weight keys:
+
+        ``anchor``
+            Dict with ``x0`` and ``w`` — the fixed first measurement.
+        ``scan_midpoints``
+            List of x0 values to scan.  Width is always ``anchor["w"]``.
+        ``rel_unc``
+            Fractional pseudo-data uncertainty applied to both measurements.
+    """
+
+    def __init__(self, cfg):
+        if isinstance(cfg, (str, os.PathLike)):
+            cfg = load_runcard(str(cfg))
+        self.cfg = cfg
+
+        self.midpoints    = None   # 1D list of scanned x0 values
+        self.ratio        = None   # 1D ndarray, NaN for overlapping/skipped cells
+        self.boundary     = None   # 1D bool array: True = overlaps anchor window
+        self.sigma_before = None   # 1D ndarray: base PDF σ per midpoint
+        self.central_vals = None   # 1D ndarray: central moment value per midpoint
+
+        self._pdf_name = None
+        self._mc2h_dir = None
+
+    # ------------------------------------------------------------------
+    def setup(self):
+        """Configure LHAPDF paths and convert MC replicas to Hessian (once)."""
+        cfg = self.cfg
+        os.makedirs(cfg['output_dir'], exist_ok=True)
+        setup_lhapdf_path(cfg.get('lhapdf_path'))
+
+        pdf_name = cfg['pdf']
+        err_type = detect_pdf_error_type(pdf_name)
+        if err_type not in ('replicas', 'mc'):
+            print(f"PDF '{pdf_name}' is {err_type!r} — no conversion needed.")
+            self._pdf_name = pdf_name
+            self._mc2h_dir = None
+        else:
+            mc2h_dir = os.path.join(os.path.abspath(cfg['output_dir']), '_hessian')
+            os.makedirs(mc2h_dir, exist_ok=True)
+            print(f"Converting '{pdf_name}' (MC replicas) → asymmetric Hessian in {mc2h_dir} …")
+            hessian_name, _ = convert_mc_to_hessian(
+                pdf_name,
+                neig=cfg.get('mc2h_neig', 50),
+                Q=float(cfg.get('mc2h_Q', 1.0)),
+                epsilon=float(cfg.get('mc2h_epsilon', 1000.0)),
+                output_dir=mc2h_dir,
+                max_nf=int(cfg.get('mc2h_max_nf', 3)),
+            )
+            setup_lhapdf_path(custom_path=mc2h_dir)
+            lhapdf.setPaths([mc2h_dir] + lhapdf.paths())
+            print(f"  → '{hessian_name}'")
+            self._pdf_name = hessian_name
+            self._mc2h_dir = mc2h_dir
+
+        return self
+
+    # ------------------------------------------------------------------
+    def run(self, force=False):
+        """Run the anchored 1D scan.  Calls setup() automatically if not already done.
+
+        Parameters
+        ----------
+        force : bool
+            Rerun ePump for every cell from scratch, ignoring any saved results.
+        """
+        if self._pdf_name is None:
+            self.setup()
+
+        cfg        = self.cfg
+        anchor_cfg = cfg['anchor']
+        ax0        = float(anchor_cfg['x0'])
+        w          = float(anchor_cfg['w'])
+        flavor     = cfg['flavor']
+        Q2         = float(cfg['Q2'])
+        nx         = int(cfg['nx'])
+        moment     = int(cfg.get('moment', 1))
+        weight     = cfg.get('weight', 'gaussian')
+        rel_unc    = float(cfg['rel_unc'])
+        output_dir = os.path.abspath(cfg['output_dir'])
+        epump_path = os.path.abspath(cfg.get('epump_path', './ePump_kp20221218/src/UpdatePDFs'))
+        pdf_name   = self._pdf_name
+        mc2h_dir   = self._mc2h_dir
+
+        midpoints = sorted(float(x) for x in cfg['scan_midpoints'])
+        n         = len(midpoints)
+
+        ratio        = np.full(n, np.nan)
+        boundary     = np.zeros(n, dtype=bool)
+        sigma_before = np.full(n, np.nan)
+        central_vals = np.full(n, np.nan)
+
+        results_path = os.path.join(output_dir, 'results_anchored.npz')
+        if not force and os.path.exists(results_path):
+            saved = np.load(results_path, allow_pickle=True)
+            if np.array_equal(saved['midpoints'], midpoints):
+                ratio[...]        = saved['ratio']
+                boundary[...]     = saved['boundary']
+                if 'sigma_before' in saved:
+                    sigma_before[...] = saved['sigma_before']
+                if 'central_vals' in saved:
+                    central_vals[...] = saved['central_vals']
+                n_done = int(np.sum(np.isfinite(ratio)))
+                if n_done:
+                    print(f"Resuming: {n_done}/{n} cells already done.")
+
+        parsed_terms = parse_flavor_expression(flavor)
+        base_set     = lhapdf.getPDFSet(pdf_name)
+        base_central = base_set.mkPDF(0)
+        base_members = base_set.mkPDFs()
+
+        # Pre-compute anchor measurement (constant across all cells)
+        axmin       = max(1e-4, ax0 - w / 2)
+        axmax       = min(0.999, ax0 + w / 2)
+        anchor_val  = compute_integrated_moment(
+            base_central, parsed_terms, axmin, axmax, nx, Q2,
+            weight_type=weight, moment=moment,
+        )
+        anchor_stat = rel_unc * abs(anchor_val)
+
+        # Compute σ_before on the ANCHOR observable (used once for reporting)
+        orig_anchor_vals = [
+            compute_integrated_moment(m, parsed_terms, axmin, axmax, nx, Q2,
+                                      weight_type=weight, moment=moment)
+            for m in base_members
+        ]
+        sigma_before_anchor = (base_set.uncertainty(orig_anchor_vals).errminus +
+                               base_set.uncertainty(orig_anchor_vals).errplus) / 2.0
+        print(f"Anchor: x0={ax0}, w={w}  |  val={anchor_val:.5g}  σ_before={sigma_before_anchor:.5g}")
+
+        theory_checked = False
+
+        for i, x0 in enumerate(midpoints):
+            if abs(x0 - ax0) < w - 1e-9:   # strict interior overlap; touching is fine
+                boundary[i] = True
+                print(f"({i+1}/{n}) [x0={x0:.4f}]  ← overlaps anchor — skipped")
+                continue
+
+            if np.isfinite(ratio[i]) and not force:
+                print(f"({i+1}/{n}) [x0={x0:.4f}]  ← already done")
+                continue
+
+            xmin    = max(1e-4, x0 - w / 2)
+            xmax    = min(0.999, x0 + w / 2)
+            clipped = (x0 - w / 2 < 1e-4) or (x0 + w / 2 > 0.999)
+
+            central_val = compute_integrated_moment(
+                base_central, parsed_terms, xmin, xmax, nx, Q2,
+                weight_type=weight, moment=moment,
+            )
+            stat_err = rel_unc * abs(central_val)
+
+            label    = f"anc_{ax0:.4f}_scan_{x0:.4f}"
+            run_name = os.path.join(output_dir, label, label)
+            run_dir  = os.path.join(output_dir, label)
+
+            if mc2h_dir and mc2h_dir not in lhapdf.paths():
+                lhapdf.setPaths([mc2h_dir] + lhapdf.paths())
+
+            already_profiled = os.path.isdir(os.path.join(run_dir, label))
+            if already_profiled:
+                if run_dir not in lhapdf.paths():
+                    lhapdf.setPaths([run_dir] + lhapdf.paths())
+                profiled_set = lhapdf.getPDFSet(label)
+            else:
+                ep = EProfiler(pdf_name, run_name, epump_path=epump_path,
+                               lhapdf_path=mc2h_dir)
+                ep.pdf_set     = base_set
+                ep.pdf_members = base_members
+                ep.add_measurement(
+                    x=ax0, Q2=Q2, value=anchor_val, stat=anchor_stat,
+                    obs_type='moment', flavor=flavor,
+                    xmin=axmin, xmax=axmax, nx=nx,
+                    weight=weight, moment=moment,
+                )
+                ep.add_measurement(
+                    x=x0, Q2=Q2, value=central_val, stat=stat_err,
+                    obs_type='moment', flavor=flavor,
+                    xmin=xmin, xmax=xmax, nx=nx,
+                    weight=weight, moment=moment,
+                )
+                ep.generate_files()
+
+                if not theory_checked:
+                    _check_theory_file_format(f"{run_name}.theory", n_obs=2)
+                    theory_checked = True
+
+                ep.run()
+                profiled_set = ep.profiled_set
+
+            # Evaluate σ on the SCAN window moment (consistent denominator with scan 1)
+            kwargs    = dict(weight_type=weight, moment=moment)
+            orig_vals = [compute_integrated_moment(
+                             m, parsed_terms, xmin, xmax, nx, Q2, **kwargs)
+                         for m in base_members]
+            lhapdf.setVerbosity(0)
+            prof_vals = [compute_integrated_moment(
+                             profiled_set.mkPDF(k), parsed_terms, xmin, xmax, nx, Q2, **kwargs)
+                         for k in range(profiled_set.size)]
+            lhapdf.setVerbosity(1)
+
+            o = base_set.uncertainty(orig_vals)
+            p = profiled_set.uncertainty(prof_vals)
+            sigma_b = (o.errminus + o.errplus) / 2.0
+            sigma_a = (p.errminus + p.errplus) / 2.0
+            r = sigma_a / sigma_b if sigma_b > 0 else np.nan
+
+            ratio[i]        = r
+            sigma_before[i] = sigma_b
+            central_vals[i] = central_val
+
+            clip_tag = "  [BOUNDARY-CLIPPED]" if clipped else ""
+            print(f"({i+1}/{n}) [x0={x0:.4f}]  → ratio={r:.4f}  "
+                  f"σ_before={sigma_b:.5g}  σ_after={sigma_a:.5g}{clip_tag}")
+            np.savez(results_path,
+                     midpoints=midpoints, ratio=ratio, boundary=boundary,
+                     sigma_before=sigma_before, central_vals=central_vals,
+                     anchor_x0=np.array(ax0), anchor_w=np.array(w),
+                     pdf_name=np.array(self._pdf_name),
+                     mc2h_dir=np.array(self._mc2h_dir or ''))
+
+        self.midpoints    = midpoints
+        self.ratio        = ratio
+        self.boundary     = boundary
+        self.sigma_before = sigma_before
+        self.central_vals = central_vals
+        print(f"Results saved → {results_path}")
+        return self
+
+    # ------------------------------------------------------------------
+    def load(self):
+        """Load results from a previous run() call."""
+        results_path = os.path.join(os.path.abspath(self.cfg['output_dir']),
+                                    'results_anchored.npz')
+        if not os.path.exists(results_path):
+            raise FileNotFoundError(
+                f"No saved results at {results_path}. Call run() first.")
+        data = np.load(results_path, allow_pickle=True)
+        self.midpoints    = data['midpoints'].tolist()
+        self.ratio        = data['ratio']
+        self.boundary     = data['boundary']
+        self.sigma_before = data['sigma_before'] if 'sigma_before' in data else None
+        self.central_vals = data['central_vals'] if 'central_vals' in data else None
+        print(f"Results loaded ← {results_path}")
+        return self
+
+    # ------------------------------------------------------------------
+    def plot(self, save=True):
+        """Plot σ_after/σ_before vs scan midpoint.
+
+        Parameters
+        ----------
+        save : bool
+            Save figure to output_dir/anchored_scan_<suffix>.pdf.
+
+        Returns
+        -------
+        matplotlib.figure.Figure
+        """
+        if self.ratio is None:
+            raise RuntimeError("Call run() or load() before plot().")
+
+        import matplotlib.pyplot as plt
+
+        cfg       = self.cfg
+        ax0       = float(cfg['anchor']['x0'])
+        w         = float(cfg['anchor']['w'])
+        moment    = int(cfg.get('moment', 1))
+        weight    = cfg.get('weight', 'gaussian')
+        obs_label = rf'$g_{{{moment}}}$' if weight == 'gaussian' else rf'$a_{{{moment}}}$'
+        pdf_label = cfg.get('pdf_label', cfg['pdf'])
+
+        x     = np.array(self.midpoints)
+        ratio = np.array(self.ratio)
+
+        fig, ax = plt.subplots(figsize=(9, 4))
+
+        mask = ~self.boundary & np.isfinite(ratio)
+        ax.plot(x[mask], ratio[mask], 'o-', color='C0')
+
+        if np.any(self.boundary):
+            ax.scatter(x[self.boundary], np.full(np.sum(self.boundary), 1.05),
+                       marker='x', s=50, color='lightgray', zorder=3,
+                       label='overlap (skipped)')
+            ax.legend(fontsize=8)
+
+        ax.axhline(1.0, color='gray', ls='--', lw=0.8)
+        ax.axvline(ax0, color='C1', ls=':', lw=1.5,
+                   label=f'anchor $x_0={ax0}$, $w={w}$')
+        # shade the anchor window
+        ax.axvspan(ax0 - w, ax0 + w, alpha=0.08, color='C1')
+
+        ax.set_ylim(0, 1.1)
+        ax.set_xlabel('Scan window midpoint  $x_0$')
+        ax.set_ylabel(r'$\sigma_{\rm after}\ /\ \sigma_{\rm before}$')
+        fig.suptitle(
+            f"{pdf_label} — Anchored window scan\n"
+            f"Anchor: $x_0={ax0}$, $w={w}$    {obs_label}    "
+            f"$Q^2={cfg['Q2']}$ GeV$^2$    {cfg['flavor']}",
+            fontsize=12,
+        )
+        plt.tight_layout()
+
+        if save:
+            suffix = '_' + os.path.basename(os.path.abspath(cfg['output_dir']))
+            out = os.path.join(os.path.abspath(cfg['output_dir']),
+                               f"anchored_scan{suffix}.pdf")
+            fig.savefig(out, dpi=150)
+            print(f"Plot → {out}")
 
         return fig
 
